@@ -13,9 +13,9 @@ import pandas, xgboost, numpy, textblob, string
 from keras.preprocessing import text, sequence
 from keras import layers, models, optimizers
 
-from collections import Counter
+from nltk.tokenize.treebank import TreebankWordDetokenizer
 
-# GitHub Comment
+from collections import Counter
 
 
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/es/"
@@ -28,30 +28,34 @@ tree_train = ET.parse(data_path + "intertass_es_train.xml", parser=parser_train)
 
 def get_dataframe_from_xml(data):
     print("Preparing data...")
-    tweetID, user, content, date, lang, sentiment = [], [], [], [], [], []
+    tweet_id, user, content, day_of_week, month, hour, lang, sentiment = [], [], [], [], [], [], [], []
     for tweet in data.iter('tweet'):
         for element in tweet.iter():
             if element.tag == 'tweetid':
-                tweetID.append(element.text)
+                tweet_id.append(element.text)
             elif element.tag == 'user':
                 user.append(element.text)
             elif element.tag == 'content':
                 content.append(element.text)
             elif element.tag == 'date':
-                date.append(element.text[:3])
+                day_of_week.append(element.text[:3])
+                month.append(element.text[4:7])
+                hour.append(element.text[11:13])
             elif element.tag == 'lang':
                 lang.append(element.text)
             elif element.tag == 'value':
                 sentiment.append(element.text)
 
     result_df = pandas.DataFrame()
-    result_df['tweetID'] = tweetID
-    result_df['user'] = user
+    result_df['tweet_id'] = tweet_id
+    # result_df['user'] = user
     result_df['content'] = content
-    result_df['lang'] = lang
+    # result_df['lang'] = lang
+    result_df['day_of_week'] = day_of_week
+    result_df['month'] = month
+    result_df['hour'] = hour
 
     encoder = preprocessing.LabelEncoder()
-    result_df['day_of_week'] = date
     result_df['sentiment'] = encoder.fit_transform(sentiment)
 
     return result_df
@@ -106,11 +110,14 @@ def text_preprocessing(data):
     result = data
     result = [tweet.replace('\n', '').strip() for tweet in result]  # Newline and leading/trailing spaces
     result = [tweet.replace(u'\u2018', "'").replace(u'\u2019', "'") for tweet in result]  # Quotes replace by general
-    result = [re.sub(r"^.*http.*$", '', tweet) for tweet in result]  # Remove all http contents
-    result = [re.sub(r"\B#\w+", '', tweet) for tweet in result]  # Remove all usernames
-    result = [re.sub(r"\B@\w+", '', tweet) for tweet in result]  # Remove all usernames
+    result = [tweet.lower() for tweet in result]
+    result = [re.sub(r"^.*http.*$", 'http', tweet) for tweet in result]  # Remove all http contents
+    result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all usernames
+    result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all hashtags
+    # result = [re.sub(r"^.*jaj.*$", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"\d+", '', tweet) for tweet in result]  # Remove all numbers
     result = [tweet.translate(str.maketrans('', '', string.punctuation)) for tweet in result]  # Remove punctuation
+
     return result
 
 
@@ -131,37 +138,49 @@ def stem_list(datalist):
 
 
 # GET THE DATA
-dataframe = get_dataframe_from_xml(tree_train)
+train_data = get_dataframe_from_xml(tree_train)
+valid_data = get_dataframe_from_xml(tree_dev)
 
 # PRE-PROCESSING
-dataframe['content'] = text_preprocessing(dataframe['content'])
+train_data['content'] = text_preprocessing(train_data['content'])
+valid_data['content'] = text_preprocessing(valid_data['content'])
+print(train_data['content'])
 
 # TOKENIZE AND REMOVE STOPWORDS
-tokenized_tweets = tokenize_stopwords_list(dataframe['content'])
+train_data['content'] = tokenize_stopwords_list(train_data['content'])
+valid_data['content'] = tokenize_stopwords_list(valid_data['content'])
 
 # STEMMING
-stemmed_tweets = stem_list(tokenized_tweets)
+train_data['content'] = stem_list(train_data['content'])
+valid_data['content'] = stem_list(valid_data['content'])
 
-all_words = [item for sublist in stemmed_tweets for item in sublist]
-print(len(all_words))
+train_data['content'] = [TreebankWordDetokenizer().detokenize(row) for row in train_data['content']]
+valid_data['content'] = [TreebankWordDetokenizer().detokenize(row) for row in valid_data['content']]
+print(train_data['content'])
+
+
+all_words = [item for sublist in train_data['content'] for item in sublist]
 
 word_counter = Counter(all_words)
-most_common_words = word_counter.most_common(10)
+most_common_words = word_counter.most_common(50)
 print(most_common_words)
 
-print(pandas.Series(dataframe['sentiment']).value_counts())
-print(pandas.Series(dataframe['day_of_week']).value_counts())
+print(train_data.groupby(['hour', 'sentiment']).size())
 
-print(dataframe)
 
 # SPLIT DATASET INTO TRAIN AND VALIDATION
-train_x, valid_x, train_y, valid_y = model_selection.train_test_split(dataframe['content'], dataframe['sentiment'])
+train_x = train_data['content']
+train_y = train_data['sentiment']
+valid_x = valid_data['content']
+valid_y = valid_data['sentiment']
+# train_x, valid_x, train_y, valid_y = model_selection.train_test_split(train_data['content'], train_data['sentiment'])
 
 # COUNT VECTORS
-x_train_count_vectors, x_valid_count_vectors = perform_count_vectors(dataframe['content'], train_x, valid_x)
+x_train_count_vectors, x_valid_count_vectors = perform_count_vectors(train_data['content'], train_x, valid_x)
 
 # TF-IDF VECTORS
-xtrain_tfidf, xtrain_tfidf_ngram, xtrain_tfidf_ngram_chars, xvalid_tfidf, xvalid_tfidf_ngram, xvalid_tfidf_ngram_chars = perform_tf_idf_vectors(dataframe['content'], train_x, valid_x)
+xtrain_tfidf, xtrain_tfidf_ngram, xtrain_tfidf_ngram_chars, xvalid_tfidf, xvalid_tfidf_ngram, xvalid_tfidf_ngram_chars = perform_tf_idf_vectors(train_data['content'], train_x, valid_x)
+
 
 # WORD EMBEDDINGS
 '''print("Messing with Word Embeddings...")
@@ -190,7 +209,7 @@ for word, i in word_index.items():
         embedding_matrix[i] = embedding_vector
 
 
-
+''''''
 # NAIVE BAYES
 # Naive Bayes on Count Vectors
 accuracy = train_model(naive_bayes.MultinomialNB(), x_train_count_vectors, train_y, x_valid_count_vectors, valid_y)
