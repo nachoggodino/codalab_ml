@@ -18,7 +18,7 @@ from nltk.tokenize.treebank import TreebankWordDetokenizer
 
 from collections import Counter
 
-LANGUAGE_CODE = 'cr'
+LANGUAGE_CODE = 'es'
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
 parser_train = ET.XMLParser(encoding='utf-8')
@@ -61,11 +61,16 @@ def get_dataframe_from_xml(data):
     return result_df
 
 
-def tokenize_list(datalist):
+def extract_uppercase_feature(dataframe):
+    regex = re.compile(r"\b[A-Z][A-Z]+\b")
     result = []
-    for row in datalist:
-        result.append(nltk.word_tokenize(row))
+    for tweet in dataframe:
+        result.append(len(regex.findall(tweet)))
     return result
+
+
+def extract_length_feature(tokenized_dataframe):
+    return [len(tweet) for tweet in tokenized_dataframe]
 
 
 def text_preprocessing(data):
@@ -75,10 +80,17 @@ def text_preprocessing(data):
     result = [re.sub(r"^.*http.*$", 'http', tweet) for tweet in result]  # Remove all http contents
     result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all usernames
     result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all hashtags
-    # result = [re.sub(r"^.*jaj.*$", 'jajaja', tweet) for tweet in result]  # Normalize laughs
+    result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"\d+", '', tweet) for tweet in result]  # Remove all numbers
     result = [tweet.translate(str.maketrans('', '', string.punctuation)) for tweet in result]  # Remove punctuation
 
+    return result
+
+
+def tokenize_list(datalist):
+    result = []
+    for row in datalist:
+        result.append(nltk.word_tokenize(row))
     return result
 
 
@@ -146,6 +158,9 @@ def print_separator(string_for_printing):
 train_data = get_dataframe_from_xml(tree_train)
 dev_data = get_dataframe_from_xml(tree_dev)
 
+train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
+dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
+
 # TEXT PREPROCESSING
 processed_train_tweets = text_preprocessing(train_data['content'])
 processed_dev_tweets = text_preprocessing(dev_data['content'])
@@ -158,8 +173,10 @@ print()
 
 tokenized_train_tweets = tokenize_list(processed_train_tweets)
 tokenized_dev_tweets = tokenize_list(processed_dev_tweets)
-train_data['length'] = [len(tweet) for tweet in tokenized_train_tweets]
-dev_data['length'] = [len(tweet) for tweet in tokenized_dev_tweets]
+
+train_data['length'] = extract_length_feature(tokenized_train_tweets)
+dev_data['length'] = extract_length_feature(tokenized_dev_tweets)
+
 print("The maximum length of a Tweet in TRAINING_DATA is: " + str(max(train_data['length'])))
 print("The minimum length of a Tweet in TRAINING_DATA is: " + str(min(train_data['length'])))
 print("The average length of a Tweet in TRAINING_DATA is: " + str(sum(train_data['length'])/len(train_data['length'])))
@@ -211,6 +228,9 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Length VS Sentiment")
     print()
     print(train_data.groupby(['length', 'sentiment']).size())
+    print("Uppercase VS Sentiment")
+    print()
+    print(train_data.groupby(['has_uppercase', 'sentiment']).size())
     print("Correlation analysis in DEVELOPMENT_DATA:")
     print()
     print("Hour VS Sentiment")
@@ -225,3 +245,6 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Length VS Sentiment")
     print()
     print(dev_data.groupby(['length', 'sentiment']).size())
+    print("Uppercase VS Sentiment")
+    print()
+    print(dev_data.groupby(['has_uppercase', 'sentiment']).size())
