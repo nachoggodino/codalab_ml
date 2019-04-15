@@ -1,10 +1,8 @@
 import xml.etree.ElementTree as ET
-import io
 import re
 import nltk
-import sys
-import string
-import matplotlib
+import unidecode
+import spacy
 
 from sklearn import model_selection, preprocessing, linear_model, naive_bayes, metrics, svm
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
@@ -81,7 +79,9 @@ def text_preprocessing(data):
     result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all usernames
     result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all hashtags
     result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
+    result = [re.sub(r"[a-zA-Z]*hah[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"\d+", '', tweet) for tweet in result]  # Remove all numbers
+    result = [unidecode.unidecode(tweet) for tweet in result]
     result = [tweet.translate(str.maketrans('', '', string.punctuation)) for tweet in result]  # Remove punctuation
 
     return result
@@ -97,7 +97,7 @@ def tokenize_list(datalist):
 def remove_stopwords(tokenized_data):
     result = []
     for row in tokenized_data:
-        result.append([word for word in row if word not in nltk.corpus.stopwords.words('spanish')])
+        result.append([word for word in row if word not in [] ]) # nltk.corpus.stopwords.words('spanish')])
     return result
 
 
@@ -107,6 +107,19 @@ def stem_list(datalist):
     for row in datalist:
         stemmed_words = [stemmer.stem(word) for word in row]
         result.append(stemmed_words)
+    return result
+
+
+def lemmatize_list(datalist):
+    lemmatizer = spacy.load("es_core_news_sm")
+    result = []
+    i = 0
+    for row in datalist:
+        if i % 10 == 0:
+            print(i)
+        lemmatized_words = [lemmatizer(token)[0].lemma_ for token in row]
+        result.append(lemmatized_words)
+        i += 1
     return result
 
 
@@ -165,6 +178,8 @@ dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
 processed_train_tweets = text_preprocessing(train_data['content'])
 processed_dev_tweets = text_preprocessing(dev_data['content'])
 
+print(processed_train_tweets)
+
 print_separator("Length Analysis of the Tweets")
 
 print("Number of Tweets in TRAINING_DATA: " + str(len(processed_train_tweets)))  # TOTAL TWEETS COUNT
@@ -197,12 +212,12 @@ clean_dev_tweets = remove_stopwords(tokenized_dev_tweets)
 
 print_vocabulary_analysis(clean_train_tweets, clean_dev_tweets)
 
-print_separator("After stemming the data...")
+print_separator("After lemmatizing the data...")
 
-stemmed_train_tweets = stem_list(clean_train_tweets)
-stemmed_dev_tweets = stem_list(clean_dev_tweets)
+lemmatized_train_tweets = lemmatize_list(clean_train_tweets)
+lemmatized_dev_tweets = lemmatize_list(clean_dev_tweets)
 
-print_vocabulary_analysis(stemmed_train_tweets, stemmed_dev_tweets)
+print_vocabulary_analysis(lemmatized_train_tweets, lemmatized_dev_tweets)
 
 print_separator("Label Counts:")
 

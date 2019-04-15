@@ -2,9 +2,8 @@ import xml.etree.ElementTree as ET
 import io
 import re
 import nltk
-import string
-import matplotlib
-
+import unidecode
+import spacy
 from sklearn import model_selection, preprocessing, linear_model, naive_bayes, metrics, svm
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn import decomposition, ensemble
@@ -94,6 +93,7 @@ def text_preprocessing(data):
     result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all hashtags
     result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"\d+", '', tweet) for tweet in result]  # Remove all numbers
+    result = [unidecode.unidecode(tweet) for tweet in result]
     result = [tweet.translate(str.maketrans('', '', string.punctuation)) for tweet in result]  # Remove punctuation
 
     return result
@@ -119,6 +119,19 @@ def stem_list(datalist):
     for row in datalist:
         stemmed_words = [stemmer.stem(word) for word in row]
         result.append(stemmed_words)
+    return result
+
+
+def lemmatize_list(datalist):
+    lemmatizer = spacy.load("es_core_news_sm")
+    result = []
+    i = 0
+    for row in datalist:
+        if i % 10 == 0:
+            print(i)
+        lemmatized_words = [lemmatizer(token)[0].lemma_ for token in row]
+        result.append(lemmatized_words)
+        i += 1
     return result
 
 
@@ -177,12 +190,12 @@ preprocessed_dev_content = text_preprocessing(dev_data['content'])
 # TOKENIZE AND REMOVE STOPWORDS
 tokenized_train_content = tokenize_list(preprocessed_train_content)
 tokenized_dev_data = tokenize_list(preprocessed_dev_content)
-clean_train_content = remove_stopwords(tokenized_train_content)
-clean_dev_content = remove_stopwords(tokenized_dev_data)
+clean_train_content = tokenized_train_content  # remove_stopwords(tokenized_train_content)
+clean_dev_content = tokenized_dev_data  # remove_stopwords(tokenized_dev_data)
 
 # STEMMING
-stemmed_train_content = stem_list(clean_train_content)
-stemmed_dev_content = stem_list(clean_dev_content)
+lemmatized_train_tweets = lemmatize_list(clean_train_content)
+lemmatized_dev_tweets = lemmatize_list(clean_dev_content)
 
 final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in clean_train_content]
 final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in clean_dev_content]
@@ -198,6 +211,7 @@ xtrain_tfidf, xtrain_tfidf_ngram, xtrain_tfidf_ngram_chars, xdev_tfidf, xdev_tfi
 print("Messing with Word Embeddings...")
 # load the pre-trained word-embedding vectors
 
+'''
 embeddings_index = {}
 for i, line in enumerate(open('C:/Users/nacho/Downloads/cc.es.300.vec/cc.es.300.vec', encoding='utf-8')):
     if i % 100000 == 0:
@@ -235,7 +249,7 @@ model.add(Dense(4, activation='softmax'))
 model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
 model.fit(tweet_pad, train_data['sentiment'], batch_size=128, epochs=100, validation_data=(tweet_pad, train_data['sentiment']), verbose=2)
-
+'''
 
 # NAIVE BAYES
 # Naive Bayes on Count Vectors
