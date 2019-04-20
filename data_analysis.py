@@ -4,6 +4,8 @@ import nltk
 import unidecode
 import spacy
 
+from re import finditer
+
 from sklearn import model_selection, preprocessing, linear_model, naive_bayes, metrics, svm
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn import decomposition, ensemble
@@ -18,11 +20,12 @@ from collections import Counter
 
 LANGUAGE_CODE = 'es'
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
+data_path_mint = "/home/nacho/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
 parser_train = ET.XMLParser(encoding='utf-8')
 
-tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
-tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
+tree_dev = ET.parse(data_path_mint + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
+tree_train = ET.parse(data_path_mint + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
 
 
 def get_dataframe_from_xml(data):
@@ -42,7 +45,10 @@ def get_dataframe_from_xml(data):
             elif element.tag == 'lang':
                 lang.append(element.text)
             elif element.tag == 'value':
-                sentiment.append(element.text)
+                if element.text == 'NONE' or element.text == 'NEU':
+                    sentiment.append('N-N')
+                else:
+                    sentiment.append(element.text)
 
     result_df = pandas.DataFrame()
     result_df['tweet_id'] = tweet_id
@@ -71,19 +77,62 @@ def extract_length_feature(tokenized_dataframe):
     return [len(tweet) for tweet in tokenized_dataframe]
 
 
+def extract_question_mark_feature(dataframe):
+    result = []
+    for tweet in dataframe:
+        if re.search(r"[/?/]", tweet):
+            result.append(1)
+        else:
+            result.append(0)
+    return result
+
+
+def extract_exclamation_mark_feature(dataframe):
+    result = []
+    for tweet in dataframe:
+        if re.search(r"[/!/]", tweet):
+            result.append(1)
+        else:
+            result.append(0)
+    return result
+
+
+def extract_letter_repetition_feature(dataframe):
+    result = []
+    for tweet in dataframe:
+        if re.search(r"(\w)(\1{2,})", tweet):
+            result.append(1)
+        else:
+            result.append(0)
+    return result
+
+
+def camel_case_split(identifier):
+    matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", identifier)
+    return [m.group(0) for m in matches]
+
+
 def text_preprocessing(data):
+
     result = data
     result = [tweet.replace('\n', '').strip() for tweet in result]  # Newline and leading/trailing spaces
-    result = [tweet.lower() for tweet in result]
+    result = [tweet.lower() for tweet in result]  # Tweet to lowercase
     result = [re.sub(r"^.*http.*$", 'http', tweet) for tweet in result]  # Remove all http contents
-    result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all usernames
-    result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all hashtags
+    result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all hashtags
+    result = [re.sub(r"\B@\w+", '', tweet) for tweet in result]  # Remove all usernames
+    result = [re.sub(r"(\w)(\1{2,})", r"\1", tweet) for tweet in result] # Remove all letter repetitions
     result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"[a-zA-Z]*hah[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"\d+", '', tweet) for tweet in result]  # Remove all numbers
-    result = [unidecode.unidecode(tweet) for tweet in result]
     result = [tweet.translate(str.maketrans('', '', string.punctuation)) for tweet in result]  # Remove punctuation
 
+    return result
+
+
+def remove_accents(tokenized_data):
+    result = []
+    for tweet in tokenized_data:
+        result.append([unidecode.unidecode(word) for word in tweet])
     return result
 
 
@@ -111,14 +160,13 @@ def stem_list(datalist):
 
 
 def lemmatize_list(datalist):
+    print("Lemmatizing the data. Could take a while...")
     lemmatizer = spacy.load("es_core_news_sm")
     result = []
     i = 0
     for row in datalist:
-        if i % 10 == 0:
-            print(i)
-        lemmatized_words = [lemmatizer(token)[0].lemma_ for token in row]
-        result.append(lemmatized_words)
+        mini_result = [token.lemma_ for token in lemmatizer(row)]
+        result.append(mini_result)
         i += 1
     return result
 
@@ -171,14 +219,9 @@ def print_separator(string_for_printing):
 train_data = get_dataframe_from_xml(tree_train)
 dev_data = get_dataframe_from_xml(tree_dev)
 
-train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
-dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
-
 # TEXT PREPROCESSING
 processed_train_tweets = text_preprocessing(train_data['content'])
 processed_dev_tweets = text_preprocessing(dev_data['content'])
-
-print(processed_train_tweets)
 
 print_separator("Length Analysis of the Tweets")
 
@@ -189,8 +232,23 @@ print()
 tokenized_train_tweets = tokenize_list(processed_train_tweets)
 tokenized_dev_tweets = tokenize_list(processed_dev_tweets)
 
+# FEATURE EXTRACTION
+train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
+dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
+
 train_data['length'] = extract_length_feature(tokenized_train_tweets)
 dev_data['length'] = extract_length_feature(tokenized_dev_tweets)
+
+train_data['question_mark'] = extract_question_mark_feature(train_data['content'])
+dev_data['question_mark'] = extract_question_mark_feature(dev_data['content'])
+
+train_data['exclamation_mark'] = extract_exclamation_mark_feature(train_data['content'])
+dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['content'])
+
+train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
+dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
+
+#VOCABULARY ANALYSIS
 
 print("The maximum length of a Tweet in TRAINING_DATA is: " + str(max(train_data['length'])))
 print("The minimum length of a Tweet in TRAINING_DATA is: " + str(min(train_data['length'])))
@@ -205,19 +263,19 @@ print_separator("Vocabulary Analysis after tokenize")
 
 print_vocabulary_analysis(tokenized_train_tweets, tokenized_dev_tweets)
 
-print_separator("After removing stopwords...")
-
-clean_train_tweets = remove_stopwords(tokenized_train_tweets)
-clean_dev_tweets = remove_stopwords(tokenized_dev_tweets)
-
-print_vocabulary_analysis(clean_train_tweets, clean_dev_tweets)
-
 print_separator("After lemmatizing the data...")
 
-lemmatized_train_tweets = lemmatize_list(clean_train_tweets)
-lemmatized_dev_tweets = lemmatize_list(clean_dev_tweets)
+lemmatized_train_tweets = lemmatize_list(processed_train_tweets)
+lemmatized_dev_tweets = lemmatize_list(processed_dev_tweets)
 
 print_vocabulary_analysis(lemmatized_train_tweets, lemmatized_dev_tweets)
+
+print_separator("After removing accents to the data...")
+
+without_accents_train = remove_accents(lemmatized_train_tweets)
+without_accents_dev = remove_accents(lemmatized_dev_tweets)
+
+print_vocabulary_analysis(without_accents_train, without_accents_dev)
 
 print_separator("Label Counts:")
 
@@ -230,6 +288,7 @@ print()
 
 print_separator("Correlation analysis in TRAINING_DATA:")
 
+'''
 with pandas.option_context('display.max_rows', None, 'display.max_columns', None):
     print("Hour VS Sentiment")
     print()
@@ -246,6 +305,12 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Uppercase VS Sentiment")
     print()
     print(train_data.groupby(['has_uppercase', 'sentiment']).size())
+    print("Question VS Sentiment")
+    print()
+    print(train_data.groupby(['question_mark', 'sentiment']).size())
+    print("Exclamation VS Sentiment")
+    print()
+    print(train_data.groupby(['exclamation_mark', 'sentiment']).size())
     print("Correlation analysis in DEVELOPMENT_DATA:")
     print()
     print("Hour VS Sentiment")
@@ -263,3 +328,10 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Uppercase VS Sentiment")
     print()
     print(dev_data.groupby(['has_uppercase', 'sentiment']).size())
+    print("Question VS Sentiment")
+    print()
+    print(dev_data.groupby(['question_mark', 'sentiment']).size())
+    print("Exclamation VS Sentiment")
+    print()
+    print(dev_data.groupby(['exclamation_mark', 'sentiment']).size())
+'''

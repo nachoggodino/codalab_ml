@@ -6,7 +6,9 @@ import unidecode
 import spacy
 from sklearn import model_selection, preprocessing, linear_model, naive_bayes, metrics, svm
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.pipeline import FeatureUnion
 from sklearn import decomposition, ensemble
+from sklearn.metrics import confusion_matrix
 
 from gensim.models import Word2Vec
 
@@ -21,22 +23,22 @@ from keras.layers.embeddings import Embedding
 from keras.initializers import Constant
 
 from nltk.tokenize.treebank import TreebankWordDetokenizer
-
 from collections import Counter
 
 
 LANGUAGE_CODE = 'es'
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
+data_path_mint = "/home/nacho/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
 parser_train = ET.XMLParser(encoding='utf-8')
 
-tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
-tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
+tree_dev = ET.parse(data_path_mint + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
+tree_train = ET.parse(data_path_mint + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
 
 
 def get_dataframe_from_xml(data):
     print("Preparing data...")
-    tweet_id, user, content, day_of_week, month, hour, lang, sentiment = [], [], [], [], [], [], [], []
+    tweet_id, user, content, day_of_week, month, hour, lang, sentiment, ternary_sentiment = [], [], [], [], [], [], [], [], []
     for tweet in data.iter('tweet'):
         for element in tweet.iter():
             if element.tag == 'tweetid':
@@ -53,6 +55,10 @@ def get_dataframe_from_xml(data):
                 lang.append(element.text)
             elif element.tag == 'value':
                 sentiment.append(element.text)
+                if element.text == 'NONE' or element.text == 'NEU':
+                    ternary_sentiment.append('N-N')
+                else:
+                    ternary_sentiment.append(element.text)
 
     result_df = pandas.DataFrame()
     result_df['tweet_id'] = tweet_id
@@ -65,21 +71,49 @@ def get_dataframe_from_xml(data):
 
     encoder = preprocessing.LabelEncoder()
     result_df['sentiment'] = encoder.fit_transform(sentiment)
-
+    result_df['ternary_sentiment'] = encoder.fit_transform(ternary_sentiment)
     return result_df
 
 
-def extract_length_feature(dataframe):
-    tokenized_dataframe = tokenize_list(dataframe)
+def extract_length_feature(tokenized_dataframe):
     return [len(tweet) for tweet in tokenized_dataframe]
 
 
 def extract_uppercase_feature(dataframe):
-    regex = r"\b[A-Z][A-Z]+\b"
-    tokenized_dataframe = tokenize_list(dataframe)
+    regex = re.compile(r"\b[A-Z][A-Z]+\b")
     result = []
-    for tweet in tokenized_dataframe:
-        result.append(re.finditer(regex, tweet))
+    for tweet in dataframe:
+        result.append(len(regex.findall(tweet)))
+    return result
+
+
+def extract_question_mark_feature(dataframe):
+    result = []
+    for tweet in dataframe:
+        if re.search(r"[/?/]", tweet):
+            result.append(1)
+        else:
+            result.append(0)
+    return result
+
+
+def extract_exclamation_mark_feature(dataframe):
+    result = []
+    for tweet in dataframe:
+        if re.search(r"[/!/]", tweet):
+            result.append(1)
+        else:
+            result.append(0)
+    return result
+
+
+def extract_letter_repetition_feature(dataframe):
+    result = []
+    for tweet in dataframe:
+        if re.search(r"(\w)(\1{2,})", tweet):
+            result.append(1)
+        else:
+            result.append(0)
     return result
 
 
@@ -89,8 +123,9 @@ def text_preprocessing(data):
     result = [tweet.replace(u'\u2018', "'").replace(u'\u2019', "'") for tweet in result]  # Quotes replace by general
     result = [tweet.lower() for tweet in result]
     result = [re.sub(r"^.*http.*$", 'http', tweet) for tweet in result]  # Remove all http contents
-    result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all usernames
-    result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all hashtags
+    result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all hashtags
+    result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all usernames
+    result = [re.sub(r"(\w)(\1{2,})", r"\1", tweet) for tweet in result]  # Remove all letter repetitions
     result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"\d+", '', tweet) for tweet in result]  # Remove all numbers
     result = [unidecode.unidecode(tweet) for tweet in result]
@@ -103,6 +138,13 @@ def tokenize_list(datalist):
     result = []
     for row in datalist:
         result.append(nltk.word_tokenize(row))
+    return result
+
+
+def remove_accents(tokenized_data):
+    result = []
+    for tweet in tokenized_data:
+        result.append([unidecode.unidecode(word) for word in tweet])
     return result
 
 
@@ -124,13 +166,13 @@ def stem_list(datalist):
 
 def lemmatize_list(datalist):
     lemmatizer = spacy.load("es_core_news_sm")
+    print("Lemmatizing data...")
     result = []
     i = 0
     for row in datalist:
-        if i % 10 == 0:
-            print(i)
-        lemmatized_words = [lemmatizer(token)[0].lemma_ for token in row]
-        result.append(lemmatized_words)
+        mini_result = []
+        mini_result = [token.lemma_ for token in lemmatizer(row)]
+        result.append(mini_result)
         i += 1
     return result
 
@@ -167,16 +209,34 @@ def perform_tf_idf_vectors(data, train_set_x, valid_set_x):
     return tr_tfidf, tr_ngram, tr_chars, val_tfidf, val_ngram, val_chars
 
 
+# NOT WORKING
+def add_feature(matrix, new_feature_vector):
+    return FeatureUnion([
+        ('count_vectors', matrix),
+        ('length', new_feature_vector)
+    ])
+
+
 def train_model(classifier, feature_vector_train, label):
     # fit the training dataset on the classifier
     classifier.fit(feature_vector_train, label)
     return classifier
 
 
-def get_model_accuracy(trained_classifier, feature_test_vector, validation_labels):
-    # predict the labels on validation dataset
-    predictions = trained_classifier.predict(feature_test_vector)
+def get_predictions(trained_classifier, feature_test_vector):
+    return trained_classifier.predict(feature_test_vector)
+
+
+def get_model_accuracy(predictions, validation_labels):
     return metrics.accuracy_score(predictions, validation_labels)
+
+
+def print_confusion_matrix(predictions, labels):
+    preds = pandas.Series(predictions, name='Predicted')
+    labs = pandas.Series(labels, name='Actual')
+    df_confusion = pandas.crosstab(labs, preds)
+    print(df_confusion)
+    return
 
 
 # GET THE DATA
@@ -187,18 +247,42 @@ dev_data = get_dataframe_from_xml(tree_dev)
 preprocessed_train_content = text_preprocessing(train_data['content'])
 preprocessed_dev_content = text_preprocessing(dev_data['content'])
 
-# TOKENIZE AND REMOVE STOPWORDS
+# TOKENIZE
 tokenized_train_content = tokenize_list(preprocessed_train_content)
 tokenized_dev_data = tokenize_list(preprocessed_dev_content)
+
+# FEATURE EXTRACTION
+train_data['tweet_length'] = extract_length_feature(tokenized_train_content)
+dev_data['tweet_length'] = extract_length_feature(tokenized_dev_data)
+
+train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
+dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
+
+train_data['question_mark'] = extract_question_mark_feature(train_data['content'])
+dev_data['question_mark'] = extract_question_mark_feature(dev_data['content'])
+
+train_data['exclamation_mark'] = extract_exclamation_mark_feature(train_data['content'])
+dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['content'])
+
+train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
+dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
+
+
+'''
 clean_train_content = tokenized_train_content  # remove_stopwords(tokenized_train_content)
 clean_dev_content = tokenized_dev_data  # remove_stopwords(tokenized_dev_data)
+'''
 
-# STEMMING
-lemmatized_train_tweets = lemmatize_list(clean_train_content)
-lemmatized_dev_tweets = lemmatize_list(clean_dev_content)
+# LEMMATIZING
+lemmatized_train_tweets = lemmatize_list(preprocessed_train_content)
+lemmatized_dev_tweets = lemmatize_list(preprocessed_dev_content)
 
-final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in clean_train_content]
-final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in clean_dev_content]
+# REMOVING ACCENTS
+without_accents_train = remove_accents(lemmatized_train_tweets)
+without_accents_dev = remove_accents(lemmatized_dev_tweets)
+
+final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_train_tweets]
+final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_dev_tweets]
 
 # COUNT VECTORS
 x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_train_content, final_dev_content)
@@ -206,14 +290,13 @@ x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_c
 # TF-IDF VECTORS
 xtrain_tfidf, xtrain_tfidf_ngram, xtrain_tfidf_ngram_chars, xdev_tfidf, xdev_tfidf_ngram, xdev_tfidf_ngram_chars = perform_tf_idf_vectors(final_train_content, final_train_content, final_dev_content)
 
-
 # WORD EMBEDDINGS
 print("Messing with Word Embeddings...")
 # load the pre-trained word-embedding vectors
 
 '''
 embeddings_index = {}
-for i, line in enumerate(open('C:/Users/nacho/Downloads/cc.es.300.vec/cc.es.300.vec', encoding='utf-8')):
+for i, line in enumerate(open('/home/nacho/cc.es.300.vec', encoding='utf-8')):
     if i % 100000 == 0:
         print(i)
     values = line.split()
@@ -254,15 +337,19 @@ model.fit(tweet_pad, train_data['sentiment'], batch_size=128, epochs=100, valida
 # NAIVE BAYES
 # Naive Bayes on Count Vectors
 
-training_labels = train_data['sentiment']
-test_labels = dev_data['sentiment']
+training_labels = train_data['ternary_sentiment']
+test_labels = dev_data['ternary_sentiment']
 
 nb_cv_classifier = train_model(naive_bayes.MultinomialNB(), x_train_count_vectors, training_labels)
-print("NB, Count Vectors: ", get_model_accuracy(nb_cv_classifier, x_dev_count_vectors, test_labels))
+nb_cv_predictions = get_predictions(nb_cv_classifier, x_dev_count_vectors)
+print("NB, Count Vectors: ", get_model_accuracy(nb_cv_predictions, test_labels))
+print_confusion_matrix(nb_cv_predictions, test_labels)
 
 # Naive Bayes on Word Level TF IDF Vectors
 nb_word_classifier = train_model(naive_bayes.MultinomialNB(), xtrain_tfidf, training_labels)
-print("NB, WordLevel TF-IDF: ", get_model_accuracy(nb_word_classifier, xdev_tfidf, test_labels))
+nb_word_predictions = get_predictions(nb_word_classifier, xdev_tfidf)
+print("NB, WordLevel TF-IDF: ", get_model_accuracy(nb_word_predictions, test_labels))
+print_confusion_matrix(nb_word_predictions, test_labels)
 '''
 # Naive Bayes on Ngram Level TF IDF Vectors
 nb_ngram_classifier = train_model(naive_bayes.MultinomialNB(), xtrain_tfidf_ngram, training_labels)
@@ -275,11 +362,29 @@ print("NB, CharLevel Vectors: ", get_model_accuracy(nb_chars_classifier, xdev_tf
 # LINEAR CLASSIFIER
 # Linear Regression on Count Vectors
 lr_cv_classifier = train_model(linear_model.LogisticRegression(), x_train_count_vectors, training_labels)
-print("LR, Count Vectors: ", get_model_accuracy(lr_cv_classifier, x_dev_count_vectors, test_labels))
+lr_cv_predictions = get_predictions(lr_cv_classifier, x_dev_count_vectors)
+print("LR, Count Vectors: ", get_model_accuracy(lr_cv_predictions, test_labels))
+print_confusion_matrix(lr_cv_predictions, test_labels)
 
 # Linear Regression on Word Level TF IDF Vectors
 lr_word_classifier = train_model(linear_model.LogisticRegression(), xtrain_tfidf, training_labels)
-print("LR, WordLevel TF-IDF: ", get_model_accuracy(lr_word_classifier, xdev_tfidf, test_labels))
+lr_word_predictions = get_predictions(lr_word_classifier, xdev_tfidf)
+print("LR, WordLevel TF-IDF: ", get_model_accuracy(lr_word_predictions, test_labels))
+print_confusion_matrix(lr_word_predictions, test_labels)
+
+# SVM on Count Vectors
+svm_cv_classifier = train_model(svm.LinearSVC(), x_train_count_vectors, training_labels)
+svm_cv_predictions = get_predictions(svm_cv_classifier, x_dev_count_vectors)
+print("SVM, CountVectors: ", get_model_accuracy(svm_cv_predictions, test_labels))
+print_confusion_matrix(svm_cv_predictions, test_labels)
+
+# SVM on Word Level TF IDF Vectors
+svm_word_classifier = train_model(svm.LinearSVC(), xtrain_tfidf, training_labels)
+svm_word_predictions = get_predictions(svm_word_classifier, xdev_tfidf)
+print("SVM, WordLevel TF-IDF: ", get_model_accuracy(svm_word_predictions, test_labels))
+print_confusion_matrix(svm_word_predictions, test_labels)
+
+
 '''
 # Linear Regression on Ngram Level TF IDF Vectors
 lr_ngram_classifier = train_model(linear_model.LogisticRegression(), xtrain_tfidf_ngram, training_labels)
@@ -288,10 +393,6 @@ print("LR, N-Gram Vectors: ", get_model_accuracy(lr_ngram_classifier, xdev_tfidf
 # Linear Regression on Character Level TF IDF Vectors
 lr_chars_classifier = train_model(linear_model.LogisticRegression(), xtrain_tfidf_ngram_chars, training_labels)
 print("LR, CharLevel Vectors: ", get_model_accuracy(lr_chars_classifier, xdev_tfidf_ngram_chars, test_labels))
-'''
-# SVM
-svm_chars_classifier = train_model(linear_model.LogisticRegression(), x_train_count_vectors, training_labels)
-print("SVM: ", get_model_accuracy(svm_chars_classifier, x_dev_count_vectors, test_labels))
 
 # RF on Count Vectors
 rf_cv_classifier = train_model(ensemble.RandomForestClassifier(), x_train_count_vectors, training_labels)
@@ -300,3 +401,4 @@ print("RF, Count Vectors: ", get_model_accuracy(rf_cv_classifier, x_dev_count_ve
 # RF on TF IDF WordLevel
 rf_word_classifier = train_model(ensemble.RandomForestClassifier(), xtrain_tfidf, training_labels)
 print("RF, WordLevel TF_IDF: ", get_model_accuracy(rf_word_classifier, xdev_tfidf, test_labels))
+'''
