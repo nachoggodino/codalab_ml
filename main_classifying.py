@@ -4,9 +4,14 @@ import re
 import nltk
 import unidecode
 import spacy
-from sklearn import model_selection, preprocessing, linear_model, naive_bayes, metrics, svm
-from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
-from sklearn.pipeline import FeatureUnion
+
+from scipy.sparse import coo_matrix, hstack
+
+from sklearn.ensemble import VotingClassifier
+from sklearn import model_selection, preprocessing, linear_model, naive_bayes, metrics, svm, tree
+from sklearn.preprocessing import FunctionTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, TfidfTransformer
+from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn import decomposition, ensemble
 from sklearn.metrics import confusion_matrix
 
@@ -211,10 +216,9 @@ def perform_tf_idf_vectors(data, train_set_x, valid_set_x):
 
 # NOT WORKING
 def add_feature(matrix, new_feature_vector):
-    return FeatureUnion([
-        ('count_vectors', matrix),
-        ('length', new_feature_vector)
-    ])
+    dummy = new_feature_vector.values[:, None]
+    return hstack(matrix, dummy)
+
 
 
 def train_model(classifier, feature_vector_train, label):
@@ -372,6 +376,19 @@ lr_word_predictions = get_predictions(lr_word_classifier, xdev_tfidf)
 print("LR, WordLevel TF-IDF: ", get_model_accuracy(lr_word_predictions, test_labels))
 print_confusion_matrix(lr_word_predictions, test_labels)
 
+# DECISION TREE
+# Decision Tree on Count Vectors
+dt_cv_classifier = train_model(tree.DecisionTreeClassifier(), x_train_count_vectors, training_labels)
+dt_cv_predictions = get_predictions(dt_cv_classifier, x_dev_count_vectors)
+print("DT, Count Vectors: ", get_model_accuracy(dt_cv_predictions, test_labels))
+print_confusion_matrix(dt_cv_predictions, test_labels)
+
+# Decision Tree on Word Level TF IDF Vectors
+dt_word_classifier = train_model(tree.DecisionTreeClassifier(), xtrain_tfidf, training_labels)
+dt_word_predictions = get_predictions(dt_cv_classifier, xdev_tfidf)
+print("DT, WordLevel TF-IDF: ", get_model_accuracy(dt_cv_predictions, test_labels))
+print_confusion_matrix(dt_cv_predictions, test_labels)
+
 # SVM on Count Vectors
 svm_cv_classifier = train_model(svm.LinearSVC(), x_train_count_vectors, training_labels)
 svm_cv_predictions = get_predictions(svm_cv_classifier, x_dev_count_vectors)
@@ -383,6 +400,32 @@ svm_word_classifier = train_model(svm.LinearSVC(), xtrain_tfidf, training_labels
 svm_word_predictions = get_predictions(svm_word_classifier, xdev_tfidf)
 print("SVM, WordLevel TF-IDF: ", get_model_accuracy(svm_word_predictions, test_labels))
 print_confusion_matrix(svm_word_predictions, test_labels)
+
+# Features
+feature_classifier = Pipeline([
+    ('features', FeatureUnion([
+        ('text', Pipeline([
+            ('vectorizer', CountVectorizer()),
+            ('tfidf', TfidfVectorizer())
+        ])),
+        ('exclamation_mark', Pipeline([
+            ('count', FunctionTransformer(extract_exclamation_mark_feature, validate=False))
+        ]))
+    ])),
+    ('classifier', svm.LinearSVC())
+])
+
+feature_classifier.fit(train_data['content'], training_labels)
+
+voting_model = VotingClassifier(estimators=[
+    ('lr', linear_model.LogisticRegression()),
+    ('nb', naive_bayes.MultinomialNB()),
+    ('dt', tree.DecisionTreeClassifier())], voting='soft')
+
+voting_classifier = train_model(voting_model, xtrain_tfidf, training_labels)
+voting_predictions = get_predictions(voting_classifier, xdev_tfidf)
+print("VOTING CLASSIFIER: ", get_model_accuracy(voting_predictions, test_labels))
+print_confusion_matrix(voting_predictions, test_labels)
 
 
 '''

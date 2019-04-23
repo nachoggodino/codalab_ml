@@ -119,7 +119,7 @@ def text_preprocessing(data):
     result = [tweet.lower() for tweet in result]  # Tweet to lowercase
     result = [re.sub(r"^.*http.*$", 'http', tweet) for tweet in result]  # Remove all http contents
     result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all hashtags
-    result = [re.sub(r"\B@\w+", '', tweet) for tweet in result]  # Remove all usernames
+    result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all usernames
     result = [re.sub(r"(\w)(\1{2,})", r"\1", tweet) for tweet in result] # Remove all letter repetitions
     result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"[a-zA-Z]*hah[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
