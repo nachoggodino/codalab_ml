@@ -3,8 +3,10 @@ import re
 import nltk
 import unidecode
 import spacy
+from textacy import keyterms
 
 from re import finditer
+
 
 from sklearn import model_selection, preprocessing, linear_model, naive_bayes, metrics, svm
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
@@ -24,8 +26,8 @@ data_path_mint = "/home/nacho/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
 parser_train = ET.XMLParser(encoding='utf-8')
 
-tree_dev = ET.parse(data_path_mint + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
-tree_train = ET.parse(data_path_mint + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
+tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
+tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
 
 
 def get_dataframe_from_xml(data):
@@ -46,7 +48,7 @@ def get_dataframe_from_xml(data):
                 lang.append(element.text)
             elif element.tag == 'value':
                 if element.text == 'NONE' or element.text == 'NEU':
-                    sentiment.append('N-N')
+                    sentiment.append(element.text)
                 else:
                     sentiment.append(element.text)
 
@@ -163,8 +165,7 @@ def lemmatize_list(datalist):
     print("Lemmatizing the data. Could take a while...")
     lemmatizer = spacy.load("es_core_news_sm")
     result = []
-    i = 0
-    for row in datalist:
+    for i, row in enumerate(datalist):
         mini_result = [token.lemma_ for token in lemmatizer(row)]
         result.append(mini_result)
         i += 1
@@ -248,7 +249,7 @@ dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['conten
 train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
 dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
 
-#VOCABULARY ANALYSIS
+# VOCABULARY ANALYSIS
 
 print("The maximum length of a Tweet in TRAINING_DATA is: " + str(max(train_data['length'])))
 print("The minimum length of a Tweet in TRAINING_DATA is: " + str(min(train_data['length'])))
@@ -262,6 +263,22 @@ print()
 print_separator("Vocabulary Analysis after tokenize")
 
 print_vocabulary_analysis(tokenized_train_tweets, tokenized_dev_tweets)
+
+pos_neg_tweets = []
+pos_neg_bool_labels = []
+for i, tweet in enumerate(tokenized_train_tweets):
+    sentiment = train_data['sentiment'][i]
+    if sentiment == 'NONE':
+        pos_neg_tweets.append(tweet)
+        pos_neg_bool_labels.append(True)
+    elif sentiment == 'NEU':
+        pos_neg_tweets.append(tweet)
+        pos_neg_bool_labels.append(False)
+
+positive_vocabulary, negative_vocabulary = keyterms.most_discriminating_terms(pos_neg_tweets, pos_neg_bool_labels)
+
+print(positive_vocabulary)
+print(negative_vocabulary)
 
 print_separator("After lemmatizing the data...")
 

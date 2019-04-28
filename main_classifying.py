@@ -4,6 +4,7 @@ import re
 import nltk
 import unidecode
 import spacy
+import textacy
 
 from scipy.sparse import coo_matrix, hstack
 
@@ -37,8 +38,8 @@ data_path_mint = "/home/nacho/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
 parser_train = ET.XMLParser(encoding='utf-8')
 
-tree_dev = ET.parse(data_path_mint + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
-tree_train = ET.parse(data_path_mint + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
+tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
+tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
 
 
 def get_dataframe_from_xml(data):
@@ -191,34 +192,23 @@ def perform_count_vectors(data, train_set_x, valid_set_x):
     return count_vect.transform(train_set_x), count_vect.transform(valid_set_x)
 
 
-def perform_tf_idf_vectors(data, train_set_x, valid_set_x):
+def perform_tf_idf_vectors(train_set_x, valid_set_x):
     # word level tf-idf
     tfidf_vect = TfidfVectorizer(analyzer='word', token_pattern=r'\w{1,}', max_features=5000)
-    tfidf_vect.fit(data)
+    tfidf_vect.fit(train_set_x)
     tr_tfidf = tfidf_vect.transform(train_set_x)
     val_tfidf = tfidf_vect.transform(valid_set_x)
 
-    # ngram level tf-idf
-    tfidf_vect_ngram = TfidfVectorizer(analyzer='word', token_pattern=r'\w{1,}', ngram_range=(2, 3), max_features=5000)
-    tfidf_vect_ngram.fit(data)
-    tr_ngram = tfidf_vect_ngram.transform(train_set_x)
-    val_ngram = tfidf_vect_ngram.transform(valid_set_x)
-
-    # characters level tf-idf
-    tfidf_vect_ngram_chars = TfidfVectorizer(analyzer='char', token_pattern=r'\w{1,}', ngram_range=(2, 3),
-                                             max_features=5000)
-    tfidf_vect_ngram_chars.fit(data)
-    tr_chars = tfidf_vect_ngram_chars.transform(train_set_x)
-    val_chars = tfidf_vect_ngram_chars.transform(valid_set_x)
-
-    return tr_tfidf, tr_ngram, tr_chars, val_tfidf, val_ngram, val_chars
 
 
-# NOT WORKING
-def add_feature(matrix, new_feature_vector):
-    dummy = new_feature_vector.values[:, None]
-    return hstack(matrix, dummy)
+    return tr_tfidf, val_tfidf
 
+
+def add_feature(matrix, new_features):
+    result = matrix
+    for feature_vector in new_features:
+        result = pandas.concat([result, feature_vector], axis=1)
+    return result
 
 
 def train_model(classifier, feature_vector_train, label):
@@ -292,7 +282,29 @@ final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmat
 x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_train_content, final_dev_content)
 
 # TF-IDF VECTORS
-xtrain_tfidf, xtrain_tfidf_ngram, xtrain_tfidf_ngram_chars, xdev_tfidf, xdev_tfidf_ngram, xdev_tfidf_ngram_chars = perform_tf_idf_vectors(final_train_content, final_train_content, final_dev_content)
+xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
+
+train_features = [
+    train_data['tweet_length'],
+    train_data['has_uppercase'],
+    train_data['exclamation_mark'],
+    train_data['question_mark'],
+    train_data['letter_repetition']
+]
+
+dev_features = [
+    dev_data['tweet_length'],
+    dev_data['has_uppercase'],
+    dev_data['exclamation_mark'],
+    dev_data['question_mark'],
+    dev_data['letter_repetition']
+]
+
+x_train_count_vectors = add_feature(pandas.DataFrame(x_train_count_vectors.todense()), train_features)
+x_dev_count_vectors = add_feature(pandas.DataFrame(x_dev_count_vectors.todense()), dev_features)
+
+xtrain_tfidf = add_feature(pandas.DataFrame(xtrain_tfidf.todense()), train_features)
+xdev_tfidf = add_feature(pandas.DataFrame(xdev_tfidf.todense()), dev_features)
 
 # WORD EMBEDDINGS
 print("Messing with Word Embeddings...")
@@ -341,8 +353,8 @@ model.fit(tweet_pad, train_data['sentiment'], batch_size=128, epochs=100, valida
 # NAIVE BAYES
 # Naive Bayes on Count Vectors
 
-training_labels = train_data['ternary_sentiment']
-test_labels = dev_data['ternary_sentiment']
+training_labels = train_data['sentiment']
+test_labels = dev_data['sentiment']
 
 nb_cv_classifier = train_model(naive_bayes.MultinomialNB(), x_train_count_vectors, training_labels)
 nb_cv_predictions = get_predictions(nb_cv_classifier, x_dev_count_vectors)
@@ -354,15 +366,7 @@ nb_word_classifier = train_model(naive_bayes.MultinomialNB(), xtrain_tfidf, trai
 nb_word_predictions = get_predictions(nb_word_classifier, xdev_tfidf)
 print("NB, WordLevel TF-IDF: ", get_model_accuracy(nb_word_predictions, test_labels))
 print_confusion_matrix(nb_word_predictions, test_labels)
-'''
-# Naive Bayes on Ngram Level TF IDF Vectors
-nb_ngram_classifier = train_model(naive_bayes.MultinomialNB(), xtrain_tfidf_ngram, training_labels)
-print("NB, N-Gram Vectors: ", get_model_accuracy(nb_ngram_classifier, xdev_tfidf_ngram, test_labels))
 
-# Naive Bayes on Character Level TF IDF Vectors
-nb_chars_classifier = train_model(naive_bayes.MultinomialNB(), xtrain_tfidf_ngram_chars, training_labels)
-print("NB, CharLevel Vectors: ", get_model_accuracy(nb_chars_classifier, xdev_tfidf_ngram_chars, test_labels))
-'''
 # LINEAR CLASSIFIER
 # Linear Regression on Count Vectors
 lr_cv_classifier = train_model(linear_model.LogisticRegression(), x_train_count_vectors, training_labels)
@@ -385,9 +389,9 @@ print_confusion_matrix(dt_cv_predictions, test_labels)
 
 # Decision Tree on Word Level TF IDF Vectors
 dt_word_classifier = train_model(tree.DecisionTreeClassifier(), xtrain_tfidf, training_labels)
-dt_word_predictions = get_predictions(dt_cv_classifier, xdev_tfidf)
-print("DT, WordLevel TF-IDF: ", get_model_accuracy(dt_cv_predictions, test_labels))
-print_confusion_matrix(dt_cv_predictions, test_labels)
+dt_word_predictions = get_predictions(dt_word_classifier, xdev_tfidf)
+print("DT, WordLevel TF-IDF: ", get_model_accuracy(dt_word_predictions, test_labels))
+print_confusion_matrix(dt_word_predictions, test_labels)
 
 # SVM on Count Vectors
 svm_cv_classifier = train_model(svm.LinearSVC(), x_train_count_vectors, training_labels)
@@ -401,47 +405,20 @@ svm_word_predictions = get_predictions(svm_word_classifier, xdev_tfidf)
 print("SVM, WordLevel TF-IDF: ", get_model_accuracy(svm_word_predictions, test_labels))
 print_confusion_matrix(svm_word_predictions, test_labels)
 
-# Features
-feature_classifier = Pipeline([
-    ('features', FeatureUnion([
-        ('text', Pipeline([
-            ('vectorizer', CountVectorizer()),
-            ('tfidf', TfidfVectorizer())
-        ])),
-        ('exclamation_mark', Pipeline([
-            ('count', FunctionTransformer(extract_exclamation_mark_feature, validate=False))
-        ]))
-    ])),
-    ('classifier', svm.LinearSVC())
-])
-
-feature_classifier.fit(train_data['content'], training_labels)
-
+# ENSEMBLINGS
 voting_model = VotingClassifier(estimators=[
     ('lr', linear_model.LogisticRegression()),
-    ('nb', naive_bayes.MultinomialNB()),
-    ('dt', tree.DecisionTreeClassifier())], voting='soft')
+    ('svm', svm.LinearSVC())], voting='hard')
 
-voting_classifier = train_model(voting_model, xtrain_tfidf, training_labels)
-voting_predictions = get_predictions(voting_classifier, xdev_tfidf)
+voting_classifier = train_model(voting_model, x_train_count_vectors, training_labels)
+voting_predictions = get_predictions(voting_classifier, x_dev_count_vectors)
 print("VOTING CLASSIFIER: ", get_model_accuracy(voting_predictions, test_labels))
 print_confusion_matrix(voting_predictions, test_labels)
 
+xgboost_model = xgboost.XGBClassifier(random_state=1, learning_rate=0.01)
+xgboost_classifier = train_model(xgboost_model, x_train_count_vectors, training_labels)
+xgboost_predictions = get_predictions(xgboost_classifier, x_dev_count_vectors)
+print("XGBOOST CLASSIFIER: ", get_model_accuracy(xgboost_predictions, test_labels))
+print_confusion_matrix(xgboost_predictions, test_labels)
 
-'''
-# Linear Regression on Ngram Level TF IDF Vectors
-lr_ngram_classifier = train_model(linear_model.LogisticRegression(), xtrain_tfidf_ngram, training_labels)
-print("LR, N-Gram Vectors: ", get_model_accuracy(lr_ngram_classifier, xdev_tfidf_ngram, test_labels))
 
-# Linear Regression on Character Level TF IDF Vectors
-lr_chars_classifier = train_model(linear_model.LogisticRegression(), xtrain_tfidf_ngram_chars, training_labels)
-print("LR, CharLevel Vectors: ", get_model_accuracy(lr_chars_classifier, xdev_tfidf_ngram_chars, test_labels))
-
-# RF on Count Vectors
-rf_cv_classifier = train_model(ensemble.RandomForestClassifier(), x_train_count_vectors, training_labels)
-print("RF, Count Vectors: ", get_model_accuracy(rf_cv_classifier, x_dev_count_vectors, test_labels))
-
-# RF on TF IDF WordLevel
-rf_word_classifier = train_model(ensemble.RandomForestClassifier(), xtrain_tfidf, training_labels)
-print("RF, WordLevel TF_IDF: ", get_model_accuracy(rf_word_classifier, xdev_tfidf, test_labels))
-'''
