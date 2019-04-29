@@ -8,6 +8,8 @@ import textacy
 
 from scipy.sparse import coo_matrix, hstack
 
+import warnings
+
 from sklearn.ensemble import VotingClassifier
 from sklearn import model_selection, preprocessing, linear_model, naive_bayes, metrics, svm, tree
 from sklearn.preprocessing import FunctionTransformer
@@ -31,6 +33,8 @@ from keras.initializers import Constant
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 from collections import Counter
 
+warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
+warnings.filterwarnings(action='ignore', category=FutureWarning)
 
 LANGUAGE_CODE = 'es'
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
@@ -40,6 +44,10 @@ parser_train = ET.XMLParser(encoding='utf-8')
 
 tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
 tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
+
+print()
+print("Language: " + LANGUAGE_CODE)
+print()
 
 
 def get_dataframe_from_xml(data):
@@ -230,6 +238,7 @@ def print_confusion_matrix(predictions, labels):
     labs = pandas.Series(labels, name='Actual')
     df_confusion = pandas.crosstab(labs, preds)
     print(df_confusion)
+    print()
     return
 
 
@@ -285,16 +294,16 @@ x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_c
 xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
 
 train_features = [
-    train_data['tweet_length'],
-    train_data['has_uppercase'],
+    #train_data['tweet_length'],
+    #train_data['has_uppercase'],
     train_data['exclamation_mark'],
     train_data['question_mark'],
     train_data['letter_repetition']
 ]
 
 dev_features = [
-    dev_data['tweet_length'],
-    dev_data['has_uppercase'],
+    #dev_data['tweet_length'],
+    #dev_data['has_uppercase'],
     dev_data['exclamation_mark'],
     dev_data['question_mark'],
     dev_data['letter_repetition']
@@ -307,7 +316,6 @@ xtrain_tfidf = add_feature(pandas.DataFrame(xtrain_tfidf.todense()), train_featu
 xdev_tfidf = add_feature(pandas.DataFrame(xdev_tfidf.todense()), dev_features)
 
 # WORD EMBEDDINGS
-print("Messing with Word Embeddings...")
 # load the pre-trained word-embedding vectors
 
 '''
@@ -352,6 +360,8 @@ model.fit(tweet_pad, train_data['sentiment'], batch_size=128, epochs=100, valida
 
 # NAIVE BAYES
 # Naive Bayes on Count Vectors
+
+print()
 
 training_labels = train_data['sentiment']
 test_labels = dev_data['sentiment']

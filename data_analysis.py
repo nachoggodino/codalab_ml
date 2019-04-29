@@ -20,7 +20,7 @@ from nltk.tokenize.treebank import TreebankWordDetokenizer
 
 from collections import Counter
 
-LANGUAGE_CODE = 'es'
+LANGUAGE_CODE = 'cr'
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
 data_path_mint = "/home/nacho/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
@@ -112,6 +112,27 @@ def extract_letter_repetition_feature(dataframe):
 def camel_case_split(identifier):
     matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", identifier)
     return [m.group(0) for m in matches]
+
+
+def print_sentiment_vocabulary(data, positive, negative):
+    pos_neg_tweets = []
+    pos_neg_bool_labels = []
+    for i, tweet in enumerate(data):
+        sentiment = train_data['sentiment'][i]
+        if sentiment == positive:
+            pos_neg_tweets.append(tweet)
+            pos_neg_bool_labels.append(True)
+        elif sentiment == negative:
+            pos_neg_tweets.append(tweet)
+            pos_neg_bool_labels.append(False)
+
+    positive_vocabulary, negative_vocabulary = keyterms.most_discriminating_terms(pos_neg_tweets, pos_neg_bool_labels)
+
+    print("The most discriminating words between " + positive + " and " + negative + " are:")
+    print("Category " + positive + ":")
+    print(positive_vocabulary)
+    print("Category " + negative + ":")
+    print(negative_vocabulary)
 
 
 def text_preprocessing(data):
@@ -264,22 +285,6 @@ print_separator("Vocabulary Analysis after tokenize")
 
 print_vocabulary_analysis(tokenized_train_tweets, tokenized_dev_tweets)
 
-pos_neg_tweets = []
-pos_neg_bool_labels = []
-for i, tweet in enumerate(tokenized_train_tweets):
-    sentiment = train_data['sentiment'][i]
-    if sentiment == 'NONE':
-        pos_neg_tweets.append(tweet)
-        pos_neg_bool_labels.append(True)
-    elif sentiment == 'NEU':
-        pos_neg_tweets.append(tweet)
-        pos_neg_bool_labels.append(False)
-
-positive_vocabulary, negative_vocabulary = keyterms.most_discriminating_terms(pos_neg_tweets, pos_neg_bool_labels)
-
-print(positive_vocabulary)
-print(negative_vocabulary)
-
 print_separator("After lemmatizing the data...")
 
 lemmatized_train_tweets = lemmatize_list(processed_train_tweets)
@@ -303,10 +308,26 @@ print("Total count of each Label in DEVELOPMENT_DATA:")
 print(dev_data['sentiment'].value_counts('N'))
 print()
 
+print_separator("Most discriminating words analysis")
+
+print("Training data:")
+print_sentiment_vocabulary(tokenized_train_tweets, 'P', 'N')
+print()
+print("Development data:")
+print_sentiment_vocabulary(tokenized_dev_tweets, 'P', 'N')
+print()
+print("Training data:")
+print_sentiment_vocabulary(tokenized_train_tweets, 'NONE', 'NEU')
+print()
+print("Development data:")
+print_sentiment_vocabulary(tokenized_dev_tweets, 'NONE', 'NEU')
+print()
+
 print_separator("Correlation analysis in TRAINING_DATA:")
 
-'''
+
 with pandas.option_context('display.max_rows', None, 'display.max_columns', None):
+    '''
     print("Hour VS Sentiment")
     print()
     print(train_data.groupby(['hour', 'sentiment']).size())
@@ -319,6 +340,7 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Length VS Sentiment")
     print()
     print(train_data.groupby(['length', 'sentiment']).size())
+    '''
     print("Uppercase VS Sentiment")
     print()
     print(train_data.groupby(['has_uppercase', 'sentiment']).size())
@@ -328,8 +350,12 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Exclamation VS Sentiment")
     print()
     print(train_data.groupby(['exclamation_mark', 'sentiment']).size())
+    print("Letter Repetition VS Sentiment")
+    print()
+    print(train_data.groupby(['letter_repetition', 'sentiment']).size())
     print("Correlation analysis in DEVELOPMENT_DATA:")
     print()
+    '''
     print("Hour VS Sentiment")
     print()
     print(dev_data.groupby(['hour', 'sentiment']).size())
@@ -342,6 +368,7 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Length VS Sentiment")
     print()
     print(dev_data.groupby(['length', 'sentiment']).size())
+    '''
     print("Uppercase VS Sentiment")
     print()
     print(dev_data.groupby(['has_uppercase', 'sentiment']).size())
@@ -351,4 +378,7 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Exclamation VS Sentiment")
     print()
     print(dev_data.groupby(['exclamation_mark', 'sentiment']).size())
-'''
+    print("Letter Repetition VS Sentiment")
+    print()
+    print(dev_data.groupby(['letter_repetition', 'sentiment']).size())
+
