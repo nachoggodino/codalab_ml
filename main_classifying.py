@@ -1,6 +1,7 @@
 import xml.etree.ElementTree as ET
 import io
 import re
+import csv
 import nltk
 import unidecode
 import spacy
@@ -17,7 +18,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, Tf
 from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn import decomposition, ensemble
 from sklearn.metrics import confusion_matrix
-
+from sklearn.model_selection import KFold
 from gensim.models import Word2Vec
 
 import pandas, xgboost, numpy, textblob, string
@@ -37,13 +38,11 @@ warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 warnings.filterwarnings(action='ignore', category=FutureWarning)
 
 LANGUAGE_CODE = 'es'
+CROSS_LINGUAL = False
+LABEL_ENCODER = preprocessing.LabelEncoder()
+TERNARY_LABEL_ENCODER = preprocessing.LabelEncoder()
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
 data_path_mint = "/home/nacho/DATASETS/public_data_development/"
-parser_dev = ET.XMLParser(encoding='utf-8')
-parser_train = ET.XMLParser(encoding='utf-8')
-
-tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
-tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
 
 print()
 print("Language: " + LANGUAGE_CODE)
@@ -83,9 +82,10 @@ def get_dataframe_from_xml(data):
     result_df['month'] = month
     result_df['hour'] = hour
 
-    encoder = preprocessing.LabelEncoder()
-    result_df['sentiment'] = encoder.fit_transform(sentiment)
-    result_df['ternary_sentiment'] = encoder.fit_transform(ternary_sentiment)
+    LABEL_ENCODER.fit(sentiment)
+    TERNARY_LABEL_ENCODER.fit(ternary_sentiment)
+    result_df['sentiment'] = LABEL_ENCODER.transform(sentiment)
+    result_df['ternary_sentiment'] = TERNARY_LABEL_ENCODER.transform(ternary_sentiment)
     return result_df
 
 
@@ -191,10 +191,10 @@ def lemmatize_list(datalist):
     return result
 
 
-def perform_count_vectors(data, train_set_x, valid_set_x):
+def perform_count_vectors(train_set_x, valid_set_x):
     # create a count vectorizer object
     count_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}')
-    count_vect.fit(data)
+    count_vect.fit(train_set_x)
 
     # transform the training and validation data using count vectorizer object
     return count_vect.transform(train_set_x), count_vect.transform(valid_set_x)
@@ -206,8 +206,6 @@ def perform_tf_idf_vectors(train_set_x, valid_set_x):
     tfidf_vect.fit(train_set_x)
     tr_tfidf = tfidf_vect.transform(train_set_x)
     val_tfidf = tfidf_vect.transform(valid_set_x)
-
-
 
     return tr_tfidf, val_tfidf
 
@@ -242,9 +240,66 @@ def print_confusion_matrix(predictions, labels):
     return
 
 
+def decode_label(predictions_array):
+    labels = ['N', 'NONE', 'NEU', 'P']
+    result = [labels[one_prediction] for one_prediction in predictions_array]
+    return result
+
+
+def get_oof(clf, x_train, y_train, x_test):
+    oof_train = numpy.zeros((x_train.shape[0],))
+    oof_test = numpy.zeros((x_test.shape[0],))
+    oof_test_skf = numpy.empty((5, x_test.shape[0]))
+    kf = KFold(n_splits=5, random_state=0)
+
+    for train_index, test_index in kf.split(x_train):
+        x_tr = x_train[train_index]
+        y_tr = y_train[train_index]
+        x_te = x_train[test_index]
+
+        clf.fit(x_tr, y_tr)
+
+        oof_train[test_index] = clf.predict(x_te)
+        oof_test_skf[test_index, :] = clf.predict(x_test)
+
+    oof_test[:] = oof_test_skf.mean(axis=0)
+    return oof_train.reshape(-1, 1), oof_test.reshape(-1, 1)
+
+
 # GET THE DATA
-train_data = get_dataframe_from_xml(tree_train)
-dev_data = get_dataframe_from_xml(tree_dev)
+
+if CROSS_LINGUAL:
+    parser_es = ET.XMLParser(encoding='utf-8')
+    parser_uy = ET.XMLParser(encoding='utf-8')
+    parser_pe = ET.XMLParser(encoding='utf-8')
+    parser_cr = ET.XMLParser(encoding='utf-8')
+    tree_es = ET.parse(data_path + "es/intertass_es_train.xml", parser=parser_es)
+    tree_uy = ET.parse(data_path + "uy/intertass_uy_train.xml", parser=parser_uy)
+    tree_pe = ET.parse(data_path + "pe/intertass_pe_train.xml", parser=parser_pe)
+    tree_cr = ET.parse(data_path + "cr/intertass_cr_train.xml", parser=parser_cr)
+    es_df = get_dataframe_from_xml(tree_es)
+    uy_df = get_dataframe_from_xml(tree_uy)
+    pe_df = get_dataframe_from_xml(tree_pe)
+    cr_df = get_dataframe_from_xml(tree_cr)
+    if LANGUAGE_CODE == 'es':
+        dev_data = es_df
+        train_data = pandas.concat([uy_df, pe_df, cr_df], ignore_index=True)
+    elif LANGUAGE_CODE == 'uy':
+        dev_data = uy_df
+        train_data = pandas.concat([es_df, pe_df, cr_df], ignore_index=True)
+    elif LANGUAGE_CODE == 'pe':
+        dev_data = pe_df
+        train_data = pandas.concat([uy_df, es_df, cr_df], ignore_index=True)
+    else :
+        dev_data = cr_df
+        train_data = pandas.concat([uy_df, pe_df, es_df], ignore_index=True)
+else:
+    parser_dev = ET.XMLParser(encoding='utf-8')
+    parser_train = ET.XMLParser(encoding='utf-8')
+    tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
+    tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
+    train_data = get_dataframe_from_xml(tree_train)
+    dev_data = get_dataframe_from_xml(tree_dev)
 
 # PRE-PROCESSING
 preprocessed_train_content = text_preprocessing(train_data['content'])
@@ -288,22 +343,22 @@ final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in lemm
 final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_dev_tweets]
 
 # COUNT VECTORS
-x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_train_content, final_dev_content)
+x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_dev_content)
 
 # TF-IDF VECTORS
 xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
 
 train_features = [
-    #train_data['tweet_length'],
-    #train_data['has_uppercase'],
+    train_data['tweet_length'],
+    train_data['has_uppercase'],
     train_data['exclamation_mark'],
     train_data['question_mark'],
     train_data['letter_repetition']
 ]
 
 dev_features = [
-    #dev_data['tweet_length'],
-    #dev_data['has_uppercase'],
+    dev_data['tweet_length'],
+    dev_data['has_uppercase'],
     dev_data['exclamation_mark'],
     dev_data['question_mark'],
     dev_data['letter_repetition']
@@ -425,10 +480,23 @@ voting_predictions = get_predictions(voting_classifier, x_dev_count_vectors)
 print("VOTING CLASSIFIER: ", get_model_accuracy(voting_predictions, test_labels))
 print_confusion_matrix(voting_predictions, test_labels)
 
+'''
+nb_oof_train, nb_oof_test = get_oof(naive_bayes.MultinomialNB(), xtrain_tfidf, training_labels, xdev_tfidf)
+lr_oof_train, lr_oof_test = get_oof(linear_model.LogisticRegression(), xtrain_tfidf, training_labels, xdev_tfidf)
+svm_oof_train, svm_oof_test = get_oof(svm.LinearSVC(), xtrain_tfidf, training_labels, xdev_tfidf)
+
+
+xgb_train = numpy.concatenate((nb_oof_train, lr_oof_train, svm_oof_train), axis=1)
+xgb_dev = numpy.concatenate((nb_oof_test, lr_oof_test, svm_oof_test), axis=1)
+
 xgboost_model = xgboost.XGBClassifier(random_state=1, learning_rate=0.01)
-xgboost_classifier = train_model(xgboost_model, x_train_count_vectors, training_labels)
-xgboost_predictions = get_predictions(xgboost_classifier, x_dev_count_vectors)
+xgboost_classifier = train_model(xgboost_model, xgb_train, training_labels)
+xgboost_predictions = get_predictions(xgboost_classifier, xgb_dev)
 print("XGBOOST CLASSIFIER: ", get_model_accuracy(xgboost_predictions, test_labels))
 print_confusion_matrix(xgboost_predictions, test_labels)
+'''
 
-
+with open(data_path + LANGUAGE_CODE + "/" + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
+    tsv_writer = csv.writer(out_file, delimiter='\t')
+    for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(svm_word_predictions)):
+        tsv_writer.writerow([dev_data['tweet_id'][i], prediction])

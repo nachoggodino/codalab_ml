@@ -2,6 +2,7 @@ import nltk
 import re
 import xml.etree.ElementTree as ET
 import unidecode
+import csv
 import pandas
 from sklearn import preprocessing
 import spacy
@@ -91,13 +92,9 @@ def get_dataframe_from_xml(data):
 train_data = get_dataframe_from_xml(tree_train)
 dev_data = get_dataframe_from_xml(tree_dev)
 
-fig = pyplot.figure()
-
-ax = fig.add_subplot(1, 1, 1)
-
-ax.hist(train_data['month'])
-
-pyplot.title('Month distribution')
-pyplot.xlabel('Month')
-pyplot.ylabel('#Tweets')
-pyplot.show()
+with open(data_path + LANGUAGE_CODE + "/output.tsv", 'wt') as out_file:
+    tsv_writer = csv.writer(out_file, delimiter='\t')
+    tsv_writer.writerow(['name', 'field'])
+    tsv_writer.writerow(['Dijkstra', 'Computer Science'])
+    tsv_writer.writerow(['Shelah', 'My Boy'])
+    tsv_writer.writerow(['Aumann', 'Economic Sciences'])
