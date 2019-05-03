@@ -5,7 +5,6 @@ import csv
 import nltk
 import unidecode
 import spacy
-import textacy
 
 from scipy.sparse import coo_matrix, hstack
 
@@ -33,6 +32,8 @@ from keras.initializers import Constant
 
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 from collections import Counter
+
+from textacy import keyterms
 
 warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 warnings.filterwarnings(action='ignore', category=FutureWarning)
@@ -129,6 +130,44 @@ def extract_letter_repetition_feature(dataframe):
         else:
             result.append(0)
     return result
+
+
+def extract_sent_words_feature(tokenized_data, data_feed):
+    positive_voc, negative_voc = get_sentiment_vocabulary(data_feed, 'P', 'N')
+    pos_result = []
+    neg_result = []
+    neutral_result = []
+    none_result = []
+    for tokenized_tweet in tokenized_data:
+        pos_count = 0
+        neg_count = 0
+        for word in tokenized_tweet:
+            if word in positive_voc:
+                pos_count += 1
+            if word in negative_voc:
+                neg_count += 1
+        pos_result.append(pos_count)
+        neg_result.append(neg_count)
+        neutral_result.append(pos_count-neg_count)
+        none_result.append(pos_count+neg_count)
+    return pos_result, neg_result, neutral_result, none_result
+
+
+def get_sentiment_vocabulary(data, positive, negative):
+    pos_neg_tweets = []
+    pos_neg_bool_labels = []
+    for i, tweet in enumerate(data):
+        sentiment = train_data['sentiment'][i]
+        if sentiment == positive:
+            pos_neg_tweets.append(tweet)
+            pos_neg_bool_labels.append(True)
+        elif sentiment == negative:
+            pos_neg_tweets.append(tweet)
+            pos_neg_bool_labels.append(False)
+
+    positive_vocabulary, negative_vocabulary = keyterms.most_discriminating_terms(pos_neg_tweets, pos_neg_bool_labels)
+
+    return positive_vocabulary, negative_vocabulary
 
 
 def text_preprocessing(data):
@@ -266,8 +305,31 @@ def get_oof(clf, x_train, y_train, x_test):
     return oof_train.reshape(-1, 1), oof_test.reshape(-1, 1)
 
 
-# GET THE DATA
+def get_pad_sequences(data):
+    tokenizer_obj = Tokenizer()
+    tokenizer_obj.fit_on_texts(data)
+    sequences = tokenizer_obj.texts_to_sequences(data)
 
+    word_index = tokenizer_obj.word_index
+    print("Found %s unique tokens." % len(word_index))
+
+    max_length = max([len(s.split()) for s in final_train_content])
+    tweet_pad = pad_sequences(sequences, maxlen=max_length)
+
+    num_words = len(word_index) + 1
+
+    embedding_matrix = numpy.zeros((num_words, 300))
+    for word, i in word_index.items():
+        if i > num_words:
+            continue
+        embedding_vector = embeddings_index.get(word)
+        if embedding_vector is not None:
+            embedding_matrix[i] = embedding_vector
+
+    return num_words, embedding_matrix, max_length, tweet_pad
+
+
+# GET THE DATA
 if CROSS_LINGUAL:
     parser_es = ET.XMLParser(encoding='utf-8')
     parser_uy = ET.XMLParser(encoding='utf-8')
@@ -301,6 +363,7 @@ else:
     train_data = get_dataframe_from_xml(tree_train)
     dev_data = get_dataframe_from_xml(tree_dev)
 
+
 # PRE-PROCESSING
 preprocessed_train_content = text_preprocessing(train_data['content'])
 preprocessed_dev_content = text_preprocessing(dev_data['content'])
@@ -325,6 +388,8 @@ dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['conten
 train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
 dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
 
+train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = extract_sent_words_feature(tokenized_train_content, tokenized_train_content)
+dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = extract_sent_words_feature(tokenized_dev_data, tokenized_train_content)
 
 '''
 clean_train_content = tokenized_train_content  # remove_stopwords(tokenized_train_content)
@@ -353,6 +418,10 @@ train_features = [
     train_data['has_uppercase'],
     train_data['exclamation_mark'],
     train_data['question_mark'],
+    train_data['pos_voc'],
+    train_data['neg_voc'],
+    train_data['neu_voc'],
+    train_data['none_voc'],
     train_data['letter_repetition']
 ]
 
@@ -361,6 +430,10 @@ dev_features = [
     dev_data['has_uppercase'],
     dev_data['exclamation_mark'],
     dev_data['question_mark'],
+    dev_data['pos_voc'],
+    dev_data['neg_voc'],
+    dev_data['neu_voc'],
+    dev_data['none_voc'],
     dev_data['letter_repetition']
 ]
 
@@ -370,56 +443,41 @@ x_dev_count_vectors = add_feature(pandas.DataFrame(x_dev_count_vectors.todense()
 xtrain_tfidf = add_feature(pandas.DataFrame(xtrain_tfidf.todense()), train_features)
 xdev_tfidf = add_feature(pandas.DataFrame(xdev_tfidf.todense()), dev_features)
 
+training_labels = train_data['sentiment']
+test_labels = dev_data['sentiment']
+
 # WORD EMBEDDINGS
 # load the pre-trained word-embedding vectors
 
-'''
+
 embeddings_index = {}
-for i, line in enumerate(open('/home/nacho/cc.es.300.vec', encoding='utf-8')):
+for i, line in enumerate(open('C:/Users/nacho/Downloads/cc.es.300.vec/cc.es.300.vec', encoding='utf-8')):
     if i % 100000 == 0:
         print(i)
     values = line.split()
     embeddings_index[values[0]] = numpy.asarray(values[1:], dtype='float32')
 
-tokenizer_obj = Tokenizer()
-tokenizer_obj.fit_on_texts(final_train_content)
-sequences = tokenizer_obj.texts_to_sequences(final_train_content)
-
-word_index = tokenizer_obj.word_index
-print("Found %s unique tokens." % len(word_index))
-
-max_length = max([len(s.split()) for s in final_train_content])
-tweet_pad = pad_sequences(sequences, maxlen=max_length)
-
-sentiment = train_data['sentiment'].values
-num_words = len(word_index) + 1
-
-embedding_matrix = numpy.zeros((num_words, 300))
-for word, i in word_index.items():
-    if i > num_words:
-        continue
-    embedding_vector = embeddings_index.get(word)
-    if embedding_vector is not None:
-        embedding_matrix[i] = embedding_vector
+train_num_words, train_embedding_matrix, train_max_length, train_pad = get_pad_sequences(final_train_content)
+dev_num_words, dev_embedding_matrix, dev_max_length, dev_pad = get_pad_sequences(final_dev_content)
 
 model = Sequential()
-embedding_layer = Embedding(num_words, 300, embeddings_initializer=Constant(embedding_matrix), input_length=max_length, trainable=False)
+embedding_layer = Embedding(train_num_words, 300, embeddings_initializer=Constant(train_embedding_matrix),
+                            input_length=train_max_length, trainable=False)
 model.add(embedding_layer)
 model.add(GRU(units=32, dropout=0.2, recurrent_dropout=0.2))
 model.add(Dense(4, activation='softmax'))
 
 model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
-model.fit(tweet_pad, train_data['sentiment'], batch_size=128, epochs=100, validation_data=(tweet_pad, train_data['sentiment']), verbose=2)
-'''
+model.fit(train_pad, training_labels, batch_size=16, epochs=30, validation_data=(dev_pad, test_labels), verbose=2)
+nn_predictions = model.predict_classes(dev_pad, batch_size=16, verbose=2)
+print("NN, Word Embeddings: ", get_model_accuracy(nn_predictions, test_labels))
+print_confusion_matrix(nn_predictions, test_labels)
 
 # NAIVE BAYES
 # Naive Bayes on Count Vectors
 
 print()
-
-training_labels = train_data['sentiment']
-test_labels = dev_data['sentiment']
 
 nb_cv_classifier = train_model(naive_bayes.MultinomialNB(), x_train_count_vectors, training_labels)
 nb_cv_predictions = get_predictions(nb_cv_classifier, x_dev_count_vectors)
@@ -495,8 +553,11 @@ xgboost_predictions = get_predictions(xgboost_classifier, xgb_dev)
 print("XGBOOST CLASSIFIER: ", get_model_accuracy(xgboost_predictions, test_labels))
 print_confusion_matrix(xgboost_predictions, test_labels)
 '''
-
-with open(data_path + LANGUAGE_CODE + "/" + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
+if CROSS_LINGUAL:
+    cross = 'cross_'
+else:
+    cross = ''
+with open(data_path + LANGUAGE_CODE + "/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
     tsv_writer = csv.writer(out_file, delimiter='\t')
     for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(svm_word_predictions)):
         tsv_writer.writerow([dev_data['tweet_id'][i], prediction])

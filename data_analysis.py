@@ -20,7 +20,7 @@ from nltk.tokenize.treebank import TreebankWordDetokenizer
 
 from collections import Counter
 
-LANGUAGE_CODE = 'cr'
+LANGUAGE_CODE = 'es'
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
 data_path_mint = "/home/nacho/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
@@ -109,12 +109,33 @@ def extract_letter_repetition_feature(dataframe):
     return result
 
 
+def extract_sent_words_feature(tokenized_data, data_feed):
+    positive_voc, negative_voc = get_sentiment_vocabulary(data_feed, 'P', 'N')
+    pos_result = []
+    neg_result = []
+    neutral_result = []
+    none_result = []
+    for tokenized_tweet in tokenized_data:
+        pos_count = 0
+        neg_count = 0
+        for word in tokenized_tweet:
+            if word in positive_voc:
+                pos_count += 1
+            if word in negative_voc:
+                neg_count += 1
+        pos_result.append(pos_count)
+        neg_result.append(neg_count)
+        neutral_result.append(pos_count-neg_count)
+        none_result.append(pos_count+neg_count)
+    return pos_result, neg_result, neutral_result, none_result
+
+
 def camel_case_split(identifier):
     matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", identifier)
     return [m.group(0) for m in matches]
 
 
-def print_sentiment_vocabulary(data, positive, negative):
+def get_sentiment_vocabulary(data, positive, negative):
     pos_neg_tweets = []
     pos_neg_bool_labels = []
     for i, tweet in enumerate(data):
@@ -128,11 +149,7 @@ def print_sentiment_vocabulary(data, positive, negative):
 
     positive_vocabulary, negative_vocabulary = keyterms.most_discriminating_terms(pos_neg_tweets, pos_neg_bool_labels)
 
-    print("The most discriminating words between " + positive + " and " + negative + " are:")
-    print("Category " + positive + ":")
-    print(positive_vocabulary)
-    print("Category " + negative + ":")
-    print(negative_vocabulary)
+    return positive_vocabulary, negative_vocabulary
 
 
 def text_preprocessing(data):
@@ -311,16 +328,23 @@ print()
 print_separator("Most discriminating words analysis")
 
 print("Training data:")
-print_sentiment_vocabulary(tokenized_train_tweets, 'P', 'N')
+train_pos_voc, train_neg_voc = get_sentiment_vocabulary(tokenized_train_tweets, 'P', 'N')
+train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = extract_sent_words_feature(tokenized_train_tweets, tokenized_train_tweets)
+print("The most discriminating words between P and N are:")
+print("Category P:")
+print(train_pos_voc)
+print("Category N:")
+print(train_neg_voc)
 print()
+
 print("Development data:")
-print_sentiment_vocabulary(tokenized_dev_tweets, 'P', 'N')
-print()
-print("Training data:")
-print_sentiment_vocabulary(tokenized_train_tweets, 'NONE', 'NEU')
-print()
-print("Development data:")
-print_sentiment_vocabulary(tokenized_dev_tweets, 'NONE', 'NEU')
+dev_pos_voc, dev_neg_voc = get_sentiment_vocabulary(tokenized_dev_tweets, 'P', 'N')
+dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = extract_sent_words_feature(tokenized_dev_tweets, tokenized_train_tweets)
+print("The most discriminating words between P and N are:")
+print("Category P:")
+print(dev_pos_voc)
+print("Category N:")
+print(dev_neg_voc)
 print()
 
 print_separator("Correlation analysis in TRAINING_DATA:")
@@ -350,9 +374,19 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Exclamation VS Sentiment")
     print()
     print(train_data.groupby(['exclamation_mark', 'sentiment']).size())
-    print("Letter Repetition VS Sentiment")
+    print("Positive Vocabulary VS Sentiment")
     print()
-    print(train_data.groupby(['letter_repetition', 'sentiment']).size())
+    print(train_data.groupby(['pos_voc', 'sentiment']).size())
+    print("Negative Vocabulary VS Sentiment")
+    print()
+    print(train_data.groupby(['neg_voc', 'sentiment']).size())
+    print("Neutral Vocabulary VS Sentiment")
+    print()
+    print(train_data.groupby(['neu_voc', 'sentiment']).size())
+    print("None Vocabulary VS Sentiment")
+    print()
+    print(train_data.groupby(['none_voc', 'sentiment']).size())
+
     print("Correlation analysis in DEVELOPMENT_DATA:")
     print()
     '''
@@ -378,7 +412,16 @@ with pandas.option_context('display.max_rows', None, 'display.max_columns', None
     print("Exclamation VS Sentiment")
     print()
     print(dev_data.groupby(['exclamation_mark', 'sentiment']).size())
-    print("Letter Repetition VS Sentiment")
+    print("Positive Vocabulary VS Sentiment")
     print()
-    print(dev_data.groupby(['letter_repetition', 'sentiment']).size())
+    print(dev_data.groupby(['pos_voc', 'sentiment']).size())
+    print("Negative Vocabulary VS Sentiment")
+    print()
+    print(dev_data.groupby(['neg_voc', 'sentiment']).size())
+    print("Neutral Vocabulary VS Sentiment")
+    print()
+    print(dev_data.groupby(['neu_voc', 'sentiment']).size())
+    print("None Vocabulary VS Sentiment")
+    print()
+    print(dev_data.groupby(['none_voc', 'sentiment']).size())
 
