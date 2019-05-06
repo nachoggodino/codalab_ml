@@ -6,7 +6,7 @@ import nltk
 import unidecode
 import spacy
 import hunspell
-
+import os
 from scipy.sparse import coo_matrix, hstack
 
 import warnings
@@ -15,7 +15,7 @@ from re import finditer
 
 from sklearn.ensemble import VotingClassifier, RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier, ExtraTreesClassifier
 from sklearn.svm import SVC, LinearSVC
-from sklearn import preprocessing, linear_model, naive_bayes, metrics, tree, svm
+from sklearn import preprocessing, linear_model, naive_bayes, metrics, tree, svm, model_selection
 from sklearn.preprocessing import FunctionTransformer, MinMaxScaler
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, TfidfTransformer
 from sklearn.pipeline import FeatureUnion, Pipeline
@@ -42,21 +42,24 @@ from textacy import keyterms
 warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 warnings.filterwarnings(action='ignore', category=FutureWarning)
 
-LANGUAGE_CODE = 'es'
-dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="C:/Users/nacho/Downloads/")
+LANGUAGE_CODE = 'cr'
+
+dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="./LIBREOFFICE")  # In case you're using CyHunspell
+# dictionary = hunspell.HunSpell('./es_ANY.dic', "./es_ANY.aff")  # In case you're using Hunspell
+
 CROSS_LINGUAL = False
 LABEL_ENCODER = preprocessing.LabelEncoder()
 TERNARY_LABEL_ENCODER = preprocessing.LabelEncoder()
-data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
-data_path_mint = "/home/nacho/DATASETS/public_data_development/"
+data_path = "./CODALAB/DATASETS/public_data_development/"
 
-emoji_pattern = re.compile("[" u"\U0001F600-\U0001F64F"  # emoticons
-         u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-         u"\U0001F680-\U0001F6FF"  # transport & map symbols
-         u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-         u"\U00002702-\U000027B0"
-         u"\U000024C2-\U0001F251"
-         "]+", flags=re.UNICODE)
+emoji_pattern = re.compile("[" 
+                           u"\U0001F600-\U0001F64F"  # emoticons
+                           u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                           u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                           u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                           u"\U00002702-\U000027B0"
+                           u"\U000024C2-\U0001F251"
+                           "]+", flags=re.UNICODE)
 
 print()
 print("Language: " + LANGUAGE_CODE)
@@ -195,7 +198,7 @@ def text_preprocessing(data):
     result = [re.sub(r"(\w)(\1{2,})", r"\1", tweet) for tweet in result]  # Remove all letter repetitions
     result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"\d+", '', tweet) for tweet in result]  # Remove all numbers
-    result = [tweet.translate(str.maketrans('', '', string.punctuation)) for tweet in result]  # Remove punctuation
+    result = [tweet.translate(str.maketrans('', '', string.punctuation + '¡')) for tweet in result]  # Remove punctuation
 
     return result
 
@@ -207,17 +210,8 @@ def camel_case_split(identifier):
 
 
 def libreoffice_processing(tokenized_data):
-    print("")
-    result = []
-    for tweet in tokenized_data:
-        mini_result = []
-        for word in tweet:
-            if not dictionary.spell(word):
-                mini_result.append(next(iter(dictionary.suggest(word)), word))
-            else:
-                mini_result.append(word)
-        result.append(mini_result)
-    return result
+    print("Libreoffice processing")
+    return [[word if dictionary.spell(word) is True else next(iter(dictionary.suggest(word)), word) for word in tweet] for tweet in tokenized_data]
 
 
 def tokenize_list(datalist):
@@ -289,10 +283,12 @@ def add_feature(matrix, new_features):
     return result
 
 
-def train_model(classifier, feature_vector_train, label):
-    # fit the training dataset on the classifier
-    classifier.fit(feature_vector_train, label)
-    return classifier
+def train_model(classifier, x_train, y_train, x_test, y_test, clf_name, description=''):
+    classifier.fit(x_train, y_train)
+    predictions = get_predictions(classifier, x_test)
+    print(clf_name + ", " + description + ":" + str(get_model_accuracy(predictions, y_test)))
+    print_confusion_matrix(predictions, y_test)
+    return classifier, predictions
 
 
 def get_predictions(trained_classifier, feature_test_vector):
@@ -309,11 +305,14 @@ def print_confusion_matrix(predictions, labels):
     df_confusion = pandas.crosstab(labs, preds)
     print(df_confusion)
     print()
-    print(f1_score(labs, preds, average='macro'))
+    prec = precision_score(labs, preds, average='macro')
+    rec = recall_score(labs, preds, average='macro')
+    score = 2*(prec*rec)/(prec+rec)
+    print("F1-Score: " + str(score) + "    <<<<<<<<<<<<<<<<")
     print()
-    print(recall_score(labs, preds, average='macro'))
+    print("Recall: " + str(rec))
     print()
-    print(precision_score(labs, preds, average='macro'))
+    print("Precision" + str(prec))
     print()
     return
 
@@ -331,12 +330,10 @@ def get_oof(clf, x_train, y_train, x_test):
     kf = KFold(n_splits=5, random_state=0)
 
     for i, (train_index, test_index) in enumerate(kf.split(x_train, y_train)):
-        x_tr = x_train[train_index]
-        y_tr = y_train[train_index]
-        x_te = x_train[test_index]
-
+        x_tr = x_train.loc[train_index, :]
+        y_tr = y_train.loc[train_index]
+        x_te = x_train.loc[test_index, :]
         clf.fit(x_tr, y_tr)
-
         oof_train[test_index] = clf.predict(x_te)
         oof_test_skf[i, :] = clf.predict(x_test)
 
@@ -364,6 +361,8 @@ def get_pad_sequences(data, embeddings_index):
         embedding_vector = embeddings_index.get(word)
         if embedding_vector is not None:
             embedding_matrix[i] = embedding_vector
+        else:
+            print("Embedding Not found" + str(word))
 
     return num_words, embedding_matrix, max_length, tweet_pad
 
@@ -427,25 +426,30 @@ dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['conten
 train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
 dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
 
-train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = extract_sent_words_feature(tokenized_train_content, tokenized_train_content)
-dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = extract_sent_words_feature(tokenized_dev_data, tokenized_train_content)
+train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = \
+    extract_sent_words_feature(tokenized_train_content, tokenized_train_content)
+dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = \
+    extract_sent_words_feature(tokenized_dev_data, tokenized_train_content)
 
-'''
-clean_train_content = tokenized_train_content  # remove_stopwords(tokenized_train_content)
-clean_dev_content = tokenized_dev_data  # remove_stopwords(tokenized_dev_data)
-'''
+
+# clean_train_content = tokenized_train_content  # remove_stopwords(tokenized_train_content)
+# clean_dev_content = tokenized_dev_data  # remove_stopwords(tokenized_dev_data)
+# '''
 
 # LIBRE OFFICE PROCESSING
-libreoffice_train_tweets = [TreebankWordDetokenizer().detokenize(row) for row in libreoffice_processing(tokenized_train_content)]
-libreoffice_dev_tweets = [TreebankWordDetokenizer().detokenize(row) for row in libreoffice_processing(tokenized_dev_data)]
+# libreoffice_train_tweets = [TreebankWordDetokenizer().detokenize(row)
+#                             for row in libreoffice_processing(tokenized_train_content)]
+# libreoffice_dev_tweets = [TreebankWordDetokenizer().detokenize(row)
+#                           for row in libreoffice_processing(tokenized_dev_data)]
 
 # LEMMATIZING
-lemmatized_train_tweets = lemmatize_list(libreoffice_train_tweets)
-lemmatized_dev_tweets = lemmatize_list(libreoffice_dev_tweets)
-
-# REMOVING ACCENTS
-without_accents_train = remove_accents(lemmatized_train_tweets)
-without_accents_dev = remove_accents(lemmatized_dev_tweets)
+lemmatized_train_tweets = lemmatize_list(preprocessed_train_content)
+lemmatized_dev_tweets = lemmatize_list(preprocessed_dev_content)
+print()
+#
+# # REMOVING ACCENTS
+# without_accents_train = remove_accents(lemmatized_train_tweets)
+# without_accents_dev = remove_accents(lemmatized_dev_tweets)
 
 final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_train_tweets]
 final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_dev_tweets]
@@ -457,26 +461,26 @@ x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_c
 xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
 
 train_features = [
-    #train_data['tweet_length'],
-    #train_data['has_uppercase'],
-    #train_data['exclamation_mark'],
-    #train_data['question_mark'],
-    #train_data['pos_voc'],
-    #train_data['neg_voc'],
-    #train_data['neu_voc'],
-    #train_data['none_voc'],
+    train_data['tweet_length'],
+    train_data['has_uppercase'],
+    train_data['exclamation_mark'],
+    train_data['question_mark'],
+    train_data['pos_voc'],
+    train_data['neg_voc'],
+    # train_data['neu_voc'],
+    train_data['none_voc'],
     train_data['letter_repetition']
 ]
 
 dev_features = [
-    #dev_data['tweet_length'],
-    #dev_data['has_uppercase'],
-    #dev_data['exclamation_mark'],
-    #dev_data['question_mark'],
-    #dev_data['pos_voc'],
-    #dev_data['neg_voc'],
-    #dev_data['neu_voc'],
-    #dev_data['none_voc'],
+    dev_data['tweet_length'],
+    dev_data['has_uppercase'],
+    dev_data['exclamation_mark'],
+    dev_data['question_mark'],
+    dev_data['pos_voc'],
+    dev_data['neg_voc'],
+    # dev_data['neu_voc'],
+    dev_data['none_voc'],
     dev_data['letter_repetition']
 ]
 
@@ -486,205 +490,134 @@ x_dev_count_vectors = add_feature(pandas.DataFrame(x_dev_count_vectors.todense()
 xtrain_tfidf = add_feature(pandas.DataFrame(xtrain_tfidf.todense()), train_features)
 xdev_tfidf = add_feature(pandas.DataFrame(xdev_tfidf.todense()), dev_features)
 
-print(x_train_count_vectors)
-
-'''
-cv_scaler = MinMaxScaler()
-cv_scaler.fit(x_train_count_vectors)
-x_train_count_vectors = cv_scaler.transform(x_train_count_vectors)
-x_dev_count_vectors = cv_scaler.transform(x_dev_count_vectors)
-
-tf_scaler = MinMaxScaler()
-tf_scaler.fit(xtrain_tfidf)
-xtrain_tfidf = tf_scaler.transform(xtrain_tfidf)
-xdev_tfidf = tf_scaler.transform(xdev_tfidf)
-'''
+training_set = x_train_count_vectors
+test_set = x_dev_count_vectors
 
 training_labels = train_data['sentiment']
 test_labels = dev_data['sentiment']
 
+# scaler = MinMaxScaler()
+# scaler.fit(training_set)
+# training_set = scaler.transform(training_set)
+# test_set = scaler.transform(test_set)
+
 # WORD EMBEDDINGS
 # load the pre-trained word-embedding vectors
 
-'''
-embeddings_index = {}
-for i, line in enumerate(open('C:/Users/nacho/Downloads/cc.es.300.vec/cc.es.300.vec', encoding='utf-8')):
-    if i % 100000 == 0:
-        print(i)
-    values = line.split()
-    embeddings_index[values[0]] = numpy.asarray(values[1:], dtype='float32')
 
-train_num_words, train_embedding_matrix, train_max_length, train_pad = get_pad_sequences(final_train_content, embeddings_index)
-dev_num_words, dev_embedding_matrix, dev_max_length, dev_pad = get_pad_sequences(final_dev_content, embeddings_index)
-
-model = Sequential()
-embedding_layer = Embedding(train_num_words, 300, embeddings_initializer=Constant(train_embedding_matrix),
-                            input_length=train_max_length, trainable=False)
-model.add(embedding_layer)
-model.add(GRU(units=32, dropout=0.2, recurrent_dropout=0.2))
-model.add(Dense(4, activation='softmax'))
-
-model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-
-model.fit(train_pad, training_labels, batch_size=16, epochs=10, validation_data=(dev_pad, test_labels), verbose=2)
-nn_predictions = model.predict_classes(dev_pad, batch_size=16, verbose=2)
-print("NN, Word Embeddings: ", get_model_accuracy(nn_predictions, test_labels))
-print_confusion_matrix(nn_predictions, test_labels)
-'''
-
-# NAIVE BAYES
-# Naive Bayes on Count Vectors
-
-print()
-'''
-nb_cv_classifier = train_model(naive_bayes.MultinomialNB(), x_train_count_vectors, training_labels)
-nb_cv_predictions = get_predictions(nb_cv_classifier, x_dev_count_vectors)
-print("NB, Count Vectors: ", get_model_accuracy(nb_cv_predictions, test_labels))
-print_confusion_matrix(nb_cv_predictions, test_labels)
-
-# Naive Bayes on Word Level TF IDF Vectors
-nb_word_classifier = train_model(naive_bayes.MultinomialNB(), xtrain_tfidf, training_labels)
-nb_word_predictions = get_predictions(nb_word_classifier, xdev_tfidf)
-print("NB, WordLevel TF-IDF: ", get_model_accuracy(nb_word_predictions, test_labels))
-print_confusion_matrix(nb_word_predictions, test_labels)
-'''
-# LINEAR CLASSIFIER
-# Linear Regression on Count Vectors
-lr_cv_classifier = train_model(linear_model.LogisticRegression(), x_train_count_vectors, training_labels)
-lr_cv_predictions = get_predictions(lr_cv_classifier, x_dev_count_vectors)
-print("LR, Count Vectors: ", get_model_accuracy(lr_cv_predictions, test_labels))
-print_confusion_matrix(lr_cv_predictions, test_labels)
-
-# Linear Regression on Word Level TF IDF Vectors
-lr_word_classifier = train_model(linear_model.LogisticRegression(), xtrain_tfidf, training_labels)
-lr_word_predictions = get_predictions(lr_word_classifier, xdev_tfidf)
-print("LR, WordLevel TF-IDF: ", get_model_accuracy(lr_word_predictions, test_labels))
-print_confusion_matrix(lr_word_predictions, test_labels)
-
-# DECISION TREE
-# Decision Tree on Count Vectors
-'''
-dt_cv_classifier = train_model(tree.DecisionTreeClassifier(), x_train_count_vectors, training_labels)
-dt_cv_predictions = get_predictions(dt_cv_classifier, x_dev_count_vectors)
-print("DT, Count Vectors: ", get_model_accuracy(dt_cv_predictions, test_labels))
-print_confusion_matrix(dt_cv_predictions, test_labels)
-
-# Decision Tree on Word Level TF IDF Vectors
-dt_word_classifier = train_model(tree.DecisionTreeClassifier(), xtrain_tfidf, training_labels)
-dt_word_predictions = get_predictions(dt_word_classifier, xdev_tfidf)
-print("DT, WordLevel TF-IDF: ", get_model_accuracy(dt_word_predictions, test_labels))
-print_confusion_matrix(dt_word_predictions, test_labels)
-'''
-
-# SVM on Count Vectors
-svm_cv_classifier = train_model(svm.LinearSVC(), x_train_count_vectors, training_labels)
-svm_cv_predictions = get_predictions(svm_cv_classifier, x_dev_count_vectors)
-print("SVM, CountVectors: ", get_model_accuracy(svm_cv_predictions, test_labels))
-print_confusion_matrix(svm_cv_predictions, test_labels)
-
-# SVM on Word Level TF IDF Vectors
-svm_word_classifier = train_model(svm.LinearSVC(), xtrain_tfidf, training_labels)
-svm_word_predictions = get_predictions(svm_word_classifier, xdev_tfidf)
-print("SVM, WordLevel TF-IDF: ", get_model_accuracy(svm_word_predictions, test_labels))
-print_confusion_matrix(svm_word_predictions, test_labels)
-
-# ENSEMBLINGS
-voting_model = VotingClassifier(estimators=[
-    ('lr', linear_model.LogisticRegression()),
-    ('svm', svm.LinearSVC()),
-    ('nb', naive_bayes.MultinomialNB())], voting='hard')
-
-voting_classifier = train_model(voting_model, x_train_count_vectors, training_labels)
-voting_predictions = get_predictions(voting_classifier, x_dev_count_vectors)
-print("VOTING CLASSIFIER: ", get_model_accuracy(voting_predictions, test_labels))
-print_confusion_matrix(voting_predictions, test_labels)
+# embeddings_index = {}
+# for i, line in enumerate(open('./VECTOR_EMBEDDINGS/cc.es.300.vec', encoding='utf-8')):
+#     if i % 100000 == 0:
+#         print(i)
+#     values = line.split()
+#     embeddings_index[values[0]] = numpy.asarray(values[1:], dtype='float32')
+#
+# train_num_words, train_embedding_matrix, train_max_length, train_pad = get_pad_sequences(final_train_content, embeddings_index)
+# dev_num_words, dev_embedding_matrix, dev_max_length, dev_pad = get_pad_sequences(final_dev_content, embeddings_index)
+#
+# model = Sequential()
+# embedding_layer = Embedding(train_num_words, 300, embeddings_initializer=Constant(train_embedding_matrix),
+#                             input_length=train_max_length, trainable=False)
+# model.add(embedding_layer)
+# model.add(GRU(units=16, dropout=0.5, recurrent_dropout=0.5, return_sequences=True))
+# model.add(Dense(4, activation='softmax'))
+#
+# model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+#
+# model.fit(train_pad, training_labels, batch_size=16, epochs=10, validation_data=(dev_pad, test_labels), verbose=2)
+# nn_predictions = model.predict_classes(dev_pad, batch_size=16, verbose=2)
+#
+# from keras.models import Model
+#
+# embedding_layer = Embedding(train_num_words, 300, embeddings_initializer=Constant(train_embedding_matrix),
+#                             input_length=train_max_length, trainable=False)
+# gru = GRU(units=16, dropout=0.5, recurrent_dropout=0.5, return_sequences=True)(embedding_layer)
+# d = Dense(4, activation='softmax')(gru)
+# model = Model(inputs=embedding_layer, outputs=d)
+# model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+#
+# model.fit(train_pad, training_labels, batch_size=16, epochs=10, validation_data=(dev_pad, test_labels), verbose=2)
+# nn_predictions = model.predict_classes(dev_pad, batch_size=16, verbose=2)
+#
+# print("NN, Word Embeddings: ", get_model_accuracy(nn_predictions, test_labels))
+# print_confusion_matrix(nn_predictions, test_labels)
 
 
-'''
-rf_params = {
-    'n_jobs': -1,
-    'n_estimators': 500,
-     'warm_start': True,
-     #'max_features': 0.2,
-    'max_depth': 6,
-    'min_samples_leaf': 2,
-    'max_features' : 'sqrt',
-    'verbose': 0
-}
+# CLASSIFIERS
+nb = naive_bayes.MultinomialNB()
+lr = linear_model.LogisticRegression()
+dt = tree.DecisionTreeClassifier()
+svm = svm.LinearSVC()
+rf = RandomForestClassifier()
+et = ExtraTreesClassifier()
+ada = AdaBoostClassifier()
+gb = GradientBoostingClassifier()
 
-# Extra Trees Parameters
-et_params = {
-    'n_jobs': -1,
-    'n_estimators':500,
-    #'max_features': 0.5,
-    'max_depth': 8,
-    'min_samples_leaf': 2,
-    'verbose': 0
-}
-
-# AdaBoost parameters
-ada_params = {
-    'n_estimators': 500,
-    'learning_rate' : 0.75
-}
-
-# Gradient Boosting parameters
-gb_params = {
-    'n_estimators': 500,
-     #'max_features': 0.2,
-    'max_depth': 5,
-    'min_samples_leaf': 2,
-    'verbose': 0
-}
-
-# Support Vector Classifier parameters
-svc_params = {
-    'kernel' : 'linear',
-    'C' : 0.025
-    }
-
-rf = RandomForestClassifier(**rf_params)
-et = ExtraTreesClassifier(**et_params)
-ada = AdaBoostClassifier(**ada_params)
-gb = GradientBoostingClassifier(**gb_params)
-svc = svm.SVC(**svc_params)
-
-training_set = xtrain_tfidf
-test_set = xdev_tfidf
-
-rf_oof_train, rf_oof_test = get_oof(rf, training_set, training_labels, test_set)
-print("1")
-et_oof_train, et_oof_test = get_oof(et, training_set, training_labels, test_set)
-print("1")
-ada_oof_train, ada_oof_test = get_oof(ada, training_set, training_labels, test_set)
-print("1")
-gb_oof_train, gb_oof_test = get_oof(gb, training_set, training_labels, test_set)
-print("1")
-svc_oof_train, svc_oof_test = get_oof(svc, training_set, training_labels, test_set)
-print("1")
-'''
-
-'''
-nb_oof_train, nb_oof_test = get_oof(naive_bayes.MultinomialNB(), xtrain_tfidf, training_labels, xdev_tfidf)
-lr_oof_train, lr_oof_test = get_oof(linear_model.LogisticRegression(), xtrain_tfidf, training_labels, xdev_tfidf)
-svm_oof_train, svm_oof_test = get_oof(svm.LinearSVC(), xtrain_tfidf, training_labels, xdev_tfidf)
+nb_classifier, nb_predictions = train_model(nb, training_set, training_labels, test_set, test_labels, 'NB')
+lr_classifier, lr_predictions = train_model(lr, training_set, training_labels, test_set, test_labels, 'LR')
+dt_classifier, dt_predictions = train_model(dt, training_set, training_labels, test_set, test_labels, 'DT')
+svm_classifier, svm_predictions = train_model(svm, training_set, training_labels, test_set, test_labels, 'SVM')
+rf_classifier, rf_predictions = train_model(rf, training_set, training_labels, test_set, test_labels, 'RF')
+et_classifier, et_predictions = train_model(et, training_set, training_labels, test_set, test_labels, 'ET')
+ada_classifier, ada_predictions = train_model(ada, training_set, training_labels, test_set, test_labels, 'ADA')
+gb_classifier, gb_predictions = train_model(gb, training_set, training_labels, test_set, test_labels, 'GB')
 
 
-xgb_train = numpy.concatenate((nb_oof_train, lr_oof_train, svm_oof_train), axis=1)
-xgb_dev = numpy.concatenate((nb_oof_test, lr_oof_test, svm_oof_test), axis=1)
+# # ENSEMBLINGS
+# voting_model = VotingClassifier(estimators=[
+#     ('lr', linear_model.LogisticRegression()),
+#     ('svm', svm.LinearSVC()),
+#     ('nb', naive_bayes.MultinomialNB())], voting='hard')
+#
+# voting_classifier = train_model(voting_model, x_train_count_vectors, training_labels)
+# voting_predictions = get_predictions(voting_classifier, x_dev_count_vectors)
+# print("VOTING CLASSIFIER: ", get_model_accuracy(voting_predictions, test_labels))
+# print_confusion_matrix(voting_predictions, test_labels)
 
-xgboost_model = xgboost.XGBClassifier(random_state=1, learning_rate=0.01)
-xgboost_classifier = train_model(xgboost_model, xgb_train, training_labels)
-xgboost_predictions = get_predictions(xgboost_classifier, xgb_dev)
-print("XGBOOST CLASSIFIER: ", get_model_accuracy(xgboost_predictions, test_labels))
-print_confusion_matrix(xgboost_predictions, test_labels)
-'''
+# rf_oof_train, rf_oof_test = get_oof(rf, training_set, training_labels, test_set)
+# print("1")
+# et_oof_train, et_oof_test = get_oof(et, training_set, training_labels, test_set)
+# print("1")
+# ada_oof_train, ada_oof_test = get_oof(ada, training_set, training_labels, test_set)
+# print("1")
+# gb_oof_train, gb_oof_test = get_oof(gb, training_set, training_labels, test_set)
+# print("1")
+# svc_oof_train, svc_oof_test = get_oof(svc, training_set, training_labels, test_set)
+# print("1")
+
+
+# nb_oof_train, nb_oof_test = get_oof(naive_bayes.MultinomialNB(), xtrain_tfidf, training_labels, xdev_tfidf)
+# lr_oof_train, lr_oof_test = get_oof(linear_model.LogisticRegression(), xtrain_tfidf, training_labels, xdev_tfidf)
+# svm_oof_train, svm_oof_test = get_oof(svm.LinearSVC(), xtrain_tfidf, training_labels, xdev_tfidf)
+
+
+# xgb_train = numpy.concatenate((nb_oof_train, lr_oof_train, svm_oof_train), axis=1)
+# xgb_dev = numpy.concatenate((nb_oof_test, lr_oof_test, svm_oof_test), axis=1)
+#
+# xgboost_model = xgboost.XGBClassifier(random_state=1, learning_rate=0.01)
+# xgboost_classifier = train_model(xgboost_model, xgb_train, training_labels)
+# xgboost_predictions = get_predictions(xgboost_classifier, xgb_dev)
+# print("XGBOOST CLASSIFIER: ", get_model_accuracy(xgboost_predictions, test_labels))
+# print_confusion_matrix(xgboost_predictions, test_labels)
+
+
 
 if CROSS_LINGUAL:
     cross = 'cross_'
 else:
     cross = ''
+
+if os.path.exists(data_path + "final_outputs/") is False:
+    print("Creating output directory " + data_path + "final_outputs/")
+    os.makedirs(data_path + "final_outputs/")
+
+# with open(data_path + "final_outputs/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
+#     tsv_writer = csv.writer(out_file, delimiter='\t')
+#     for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_word_predictions)):
+#         tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
+
+
 with open(data_path + "final_outputs/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
     tsv_writer = csv.writer(out_file, delimiter='\t')
-    for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_word_predictions)):
+    for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_predictions)):
         tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
