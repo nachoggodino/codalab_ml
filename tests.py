@@ -8,6 +8,7 @@ from sklearn import preprocessing
 import spacy
 from re import finditer
 import matplotlib.pyplot as pyplot
+import hunspell
 
 
 lemmatizer = spacy.load("es_core_news_sm")
@@ -89,4 +90,7 @@ def get_dataframe_from_xml(data):
     return result_df
 
 
-print(camel_case_split("HolaComoEstas"))
+dicc = hunspell.Hunspell('es_ANY', hunspell_data_dir="C:/Users/nacho/Downloads/")
+print(dicc.suggest
+      ('holla'))
+print(dicc.suggest("holla")[0])

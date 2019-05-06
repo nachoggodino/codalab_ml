@@ -4,6 +4,7 @@ import nltk
 import unidecode
 import spacy
 from textacy import keyterms
+import hunspell
 
 from re import finditer
 
@@ -20,7 +21,17 @@ from nltk.tokenize.treebank import TreebankWordDetokenizer
 
 from collections import Counter
 
-LANGUAGE_CODE = 'mx'
+LANGUAGE_CODE = 'es'
+dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="C:/Users/nacho/Downloads/")
+
+emoji_pattern = re.compile("[" u"\U0001F600-\U0001F64F"  # emoticons
+         u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+         u"\U0001F680-\U0001F6FF"  # transport & map symbols
+         u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+         u"\U00002702-\U000027B0"
+         u"\U000024C2-\U0001F251"
+         "]+", flags=re.UNICODE)
+
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
 data_path_mint = "/home/nacho/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
@@ -136,6 +147,21 @@ def camel_case_split(identifier):
     return ' '.join([m.group(0) for m in matches])
 
 
+def libreoffice_processing(tokenized_data):
+    result = []
+    for tweet in tokenized_data:
+        mini_result = []
+        for word in tweet:
+            print("From " + word + " to")
+            print(next(iter(dictionary.suggest(word)), word))
+            if not dictionary.spell(word):
+                mini_result.append(next(iter(dictionary.suggest(word)), word))
+            else:
+                mini_result.append(word)
+        result.append(mini_result)
+    return result
+
+
 def get_sentiment_vocabulary(data, positive, negative):
     pos_neg_tweets = []
     pos_neg_bool_labels = []
@@ -157,6 +183,7 @@ def text_preprocessing(data):
 
     result = data
     result = [tweet.replace('\n', '').strip() for tweet in result]  # Newline and leading/trailing spaces
+    result = [emoji_pattern.sub(r'', tweet) for tweet in result]
     result = [re.sub(r"\B#\w+", lambda m: camel_case_split(m.group(0)), tweet) for tweet in result]  # Hashtag
     result = [tweet.lower() for tweet in result]  # Tweet to lowercase
     result = [re.sub(r"^.*http.*$", 'http', tweet) for tweet in result]  # Remove all http contents
@@ -302,6 +329,12 @@ print()
 print_separator("Vocabulary Analysis after tokenize")
 
 print_vocabulary_analysis(tokenized_train_tweets, tokenized_dev_tweets)
+
+print_separator("Vocabulary Analysis after Libreoffice Processing")
+
+libreoffice_train_tweets = libreoffice_processing(tokenized_train_tweets)
+libreoffice_dev_tweets = libreoffice_processing(tokenized_dev_tweets)
+print_vocabulary_analysis(libreoffice_train_tweets, libreoffice_dev_tweets)
 
 print_separator("After lemmatizing the data...")
 

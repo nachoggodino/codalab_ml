@@ -5,6 +5,7 @@ import csv
 import nltk
 import unidecode
 import spacy
+import hunspell
 
 from scipy.sparse import coo_matrix, hstack
 
@@ -42,11 +43,20 @@ warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 warnings.filterwarnings(action='ignore', category=FutureWarning)
 
 LANGUAGE_CODE = 'es'
+dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="C:/Users/nacho/Downloads/")
 CROSS_LINGUAL = False
 LABEL_ENCODER = preprocessing.LabelEncoder()
 TERNARY_LABEL_ENCODER = preprocessing.LabelEncoder()
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
 data_path_mint = "/home/nacho/DATASETS/public_data_development/"
+
+emoji_pattern = re.compile("[" u"\U0001F600-\U0001F64F"  # emoticons
+         u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+         u"\U0001F680-\U0001F6FF"  # transport & map symbols
+         u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+         u"\U00002702-\U000027B0"
+         u"\U000024C2-\U0001F251"
+         "]+", flags=re.UNICODE)
 
 print()
 print("Language: " + LANGUAGE_CODE)
@@ -176,6 +186,7 @@ def get_sentiment_vocabulary(data, positive, negative):
 def text_preprocessing(data):
     result = data
     result = [tweet.replace('\n', '').strip() for tweet in result]  # Newline and leading/trailing spaces
+    result = [emoji_pattern.sub(r'', tweet) for tweet in result]
     result = [tweet.replace(u'\u2018', "'").replace(u'\u2019', "'") for tweet in result]  # Quotes replace by general
     result = [re.sub(r"\B#\w+", lambda m: camel_case_split(m.group(0)), tweet) for tweet in result]  # Hashtag
     result = [tweet.lower() for tweet in result]
@@ -193,6 +204,21 @@ def camel_case_split(identifier):
     clean_identifier = re.sub('[#]', '', identifier)
     matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", clean_identifier)
     return ' '.join([m.group(0) for m in matches])
+
+
+def libreoffice_processing(tokenized_data):
+    result = []
+    for tweet in tokenized_data:
+        mini_result = []
+        for word in tweet:
+            print("From " + word + " to")
+            print(next(iter(dictionary.suggest(word)), word))
+            if not dictionary.spell(word):
+                mini_result.append(next(iter(dictionary.suggest(word)), word))
+            else:
+                mini_result.append(word)
+        result.append(mini_result)
+    return result
 
 
 def tokenize_list(datalist):
@@ -411,8 +437,8 @@ clean_dev_content = tokenized_dev_data  # remove_stopwords(tokenized_dev_data)
 '''
 
 # LEMMATIZING
-lemmatized_train_tweets = lemmatize_list(preprocessed_train_content)
-lemmatized_dev_tweets = lemmatize_list(preprocessed_dev_content)
+lemmatized_train_tweets = lemmatize_list(libreoffice_processing(tokenized_train_content))
+lemmatized_dev_tweets = lemmatize_list(libreoffice_processing(tokenized_dev_data))
 
 # REMOVING ACCENTS
 without_accents_train = remove_accents(lemmatized_train_tweets)
@@ -428,26 +454,26 @@ x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_c
 xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
 
 train_features = [
-    train_data['tweet_length'],
-    train_data['has_uppercase'],
-    train_data['exclamation_mark'],
-    train_data['question_mark'],
-    train_data['pos_voc'],
-    train_data['neg_voc'],
-    train_data['neu_voc'],
-    train_data['none_voc'],
+    #train_data['tweet_length'],
+    #train_data['has_uppercase'],
+    #train_data['exclamation_mark'],
+    #train_data['question_mark'],
+    #train_data['pos_voc'],
+    #train_data['neg_voc'],
+    #train_data['neu_voc'],
+    #train_data['none_voc'],
     train_data['letter_repetition']
 ]
 
 dev_features = [
-    dev_data['tweet_length'],
-    dev_data['has_uppercase'],
-    dev_data['exclamation_mark'],
-    dev_data['question_mark'],
-    dev_data['pos_voc'],
-    dev_data['neg_voc'],
-    dev_data['neu_voc'],
-    dev_data['none_voc'],
+    #dev_data['tweet_length'],
+    #dev_data['has_uppercase'],
+    #dev_data['exclamation_mark'],
+    #dev_data['question_mark'],
+    #dev_data['pos_voc'],
+    #dev_data['neg_voc'],
+    #dev_data['neu_voc'],
+    #dev_data['none_voc'],
     dev_data['letter_repetition']
 ]
 
@@ -457,7 +483,9 @@ x_dev_count_vectors = add_feature(pandas.DataFrame(x_dev_count_vectors.todense()
 xtrain_tfidf = add_feature(pandas.DataFrame(xtrain_tfidf.todense()), train_features)
 xdev_tfidf = add_feature(pandas.DataFrame(xdev_tfidf.todense()), dev_features)
 
+print(x_train_count_vectors)
 
+'''
 cv_scaler = MinMaxScaler()
 cv_scaler.fit(x_train_count_vectors)
 x_train_count_vectors = cv_scaler.transform(x_train_count_vectors)
@@ -467,7 +495,7 @@ tf_scaler = MinMaxScaler()
 tf_scaler.fit(xtrain_tfidf)
 xtrain_tfidf = tf_scaler.transform(xtrain_tfidf)
 xdev_tfidf = tf_scaler.transform(xdev_tfidf)
-
+'''
 
 training_labels = train_data['sentiment']
 test_labels = dev_data['sentiment']
@@ -505,7 +533,7 @@ print_confusion_matrix(nn_predictions, test_labels)
 # Naive Bayes on Count Vectors
 
 print()
-
+'''
 nb_cv_classifier = train_model(naive_bayes.MultinomialNB(), x_train_count_vectors, training_labels)
 nb_cv_predictions = get_predictions(nb_cv_classifier, x_dev_count_vectors)
 print("NB, Count Vectors: ", get_model_accuracy(nb_cv_predictions, test_labels))
@@ -516,7 +544,7 @@ nb_word_classifier = train_model(naive_bayes.MultinomialNB(), xtrain_tfidf, trai
 nb_word_predictions = get_predictions(nb_word_classifier, xdev_tfidf)
 print("NB, WordLevel TF-IDF: ", get_model_accuracy(nb_word_predictions, test_labels))
 print_confusion_matrix(nb_word_predictions, test_labels)
-
+'''
 # LINEAR CLASSIFIER
 # Linear Regression on Count Vectors
 lr_cv_classifier = train_model(linear_model.LogisticRegression(), x_train_count_vectors, training_labels)
@@ -532,6 +560,7 @@ print_confusion_matrix(lr_word_predictions, test_labels)
 
 # DECISION TREE
 # Decision Tree on Count Vectors
+'''
 dt_cv_classifier = train_model(tree.DecisionTreeClassifier(), x_train_count_vectors, training_labels)
 dt_cv_predictions = get_predictions(dt_cv_classifier, x_dev_count_vectors)
 print("DT, Count Vectors: ", get_model_accuracy(dt_cv_predictions, test_labels))
@@ -542,6 +571,7 @@ dt_word_classifier = train_model(tree.DecisionTreeClassifier(), xtrain_tfidf, tr
 dt_word_predictions = get_predictions(dt_word_classifier, xdev_tfidf)
 print("DT, WordLevel TF-IDF: ", get_model_accuracy(dt_word_predictions, test_labels))
 print_confusion_matrix(dt_word_predictions, test_labels)
+'''
 
 # SVM on Count Vectors
 svm_cv_classifier = train_model(svm.LinearSVC(), x_train_count_vectors, training_labels)
