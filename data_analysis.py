@@ -20,7 +20,7 @@ from nltk.tokenize.treebank import TreebankWordDetokenizer
 
 from collections import Counter
 
-LANGUAGE_CODE = 'es'
+LANGUAGE_CODE = 'mx'
 data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
 data_path_mint = "/home/nacho/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
@@ -131,8 +131,9 @@ def extract_sent_words_feature(tokenized_data, data_feed):
 
 
 def camel_case_split(identifier):
-    matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", identifier)
-    return [m.group(0) for m in matches]
+    clean_identifier = re.sub('[#]', '', identifier)
+    matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", clean_identifier)
+    return ' '.join([m.group(0) for m in matches])
 
 
 def get_sentiment_vocabulary(data, positive, negative):
@@ -156,9 +157,9 @@ def text_preprocessing(data):
 
     result = data
     result = [tweet.replace('\n', '').strip() for tweet in result]  # Newline and leading/trailing spaces
+    result = [re.sub(r"\B#\w+", lambda m: camel_case_split(m.group(0)), tweet) for tweet in result]  # Hashtag
     result = [tweet.lower() for tweet in result]  # Tweet to lowercase
     result = [re.sub(r"^.*http.*$", 'http', tweet) for tweet in result]  # Remove all http contents
-    result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all hashtags
     result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all usernames
     result = [re.sub(r"(\w)(\1{2,})", r"\1", tweet) for tweet in result] # Remove all letter repetitions
     result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs

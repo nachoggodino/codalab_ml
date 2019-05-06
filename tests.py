@@ -27,7 +27,7 @@ def lemmatize_word(word):
 
 def camel_case_split(identifier):
     matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", identifier)
-    return [m.group(0) for m in matches]
+    return ' '.join([m.group(0) for m in matches])
 
 
 def regex_tester(string):
@@ -89,12 +89,4 @@ def get_dataframe_from_xml(data):
     return result_df
 
 
-train_data = get_dataframe_from_xml(tree_train)
-dev_data = get_dataframe_from_xml(tree_dev)
-
-with open(data_path + LANGUAGE_CODE + "/output.tsv", 'wt') as out_file:
-    tsv_writer = csv.writer(out_file, delimiter='\t')
-    tsv_writer.writerow(['name', 'field'])
-    tsv_writer.writerow(['Dijkstra', 'Computer Science'])
-    tsv_writer.writerow(['Shelah', 'My Boy'])
-    tsv_writer.writerow(['Aumann', 'Economic Sciences'])
+print(camel_case_split("HolaComoEstas"))

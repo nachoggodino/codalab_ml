@@ -10,13 +10,16 @@ from scipy.sparse import coo_matrix, hstack
 
 import warnings
 
-from sklearn.ensemble import VotingClassifier
-from sklearn import model_selection, preprocessing, linear_model, naive_bayes, metrics, svm, tree
-from sklearn.preprocessing import FunctionTransformer
+from re import finditer
+
+from sklearn.ensemble import VotingClassifier, RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier, ExtraTreesClassifier
+from sklearn.svm import SVC, LinearSVC
+from sklearn import preprocessing, linear_model, naive_bayes, metrics, tree, svm
+from sklearn.preprocessing import FunctionTransformer, MinMaxScaler
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, TfidfTransformer
 from sklearn.pipeline import FeatureUnion, Pipeline
 from sklearn import decomposition, ensemble
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
 from sklearn.model_selection import KFold
 from gensim.models import Word2Vec
 
@@ -133,7 +136,7 @@ def extract_letter_repetition_feature(dataframe):
 
 
 def extract_sent_words_feature(tokenized_data, data_feed):
-    positive_voc, negative_voc = get_sentiment_vocabulary(data_feed, 'P', 'N')
+    positive_voc, negative_voc = get_sentiment_vocabulary(data_feed, 3, 0)
     pos_result = []
     neg_result = []
     neutral_result = []
@@ -156,8 +159,8 @@ def extract_sent_words_feature(tokenized_data, data_feed):
 def get_sentiment_vocabulary(data, positive, negative):
     pos_neg_tweets = []
     pos_neg_bool_labels = []
-    for i, tweet in enumerate(data):
-        sentiment = train_data['sentiment'][i]
+    for index, tweet in enumerate(data):
+        sentiment = train_data['sentiment'][index]
         if sentiment == positive:
             pos_neg_tweets.append(tweet)
             pos_neg_bool_labels.append(True)
@@ -174,17 +177,22 @@ def text_preprocessing(data):
     result = data
     result = [tweet.replace('\n', '').strip() for tweet in result]  # Newline and leading/trailing spaces
     result = [tweet.replace(u'\u2018', "'").replace(u'\u2019', "'") for tweet in result]  # Quotes replace by general
+    result = [re.sub(r"\B#\w+", lambda m: camel_case_split(m.group(0)), tweet) for tweet in result]  # Hashtag
     result = [tweet.lower() for tweet in result]
     result = [re.sub(r"^.*http.*$", 'http', tweet) for tweet in result]  # Remove all http contents
-    result = [re.sub(r"\B#\w+", 'hashtag', tweet) for tweet in result]  # Remove all hashtags
     result = [re.sub(r"\B@\w+", 'username', tweet) for tweet in result]  # Remove all usernames
     result = [re.sub(r"(\w)(\1{2,})", r"\1", tweet) for tweet in result]  # Remove all letter repetitions
     result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
     result = [re.sub(r"\d+", '', tweet) for tweet in result]  # Remove all numbers
-    result = [unidecode.unidecode(tweet) for tweet in result]
     result = [tweet.translate(str.maketrans('', '', string.punctuation)) for tweet in result]  # Remove punctuation
 
     return result
+
+
+def camel_case_split(identifier):
+    clean_identifier = re.sub('[#]', '', identifier)
+    matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", clean_identifier)
+    return ' '.join([m.group(0) for m in matches])
 
 
 def tokenize_list(datalist):
@@ -276,6 +284,12 @@ def print_confusion_matrix(predictions, labels):
     df_confusion = pandas.crosstab(labs, preds)
     print(df_confusion)
     print()
+    print(f1_score(labs, preds, average='macro'))
+    print()
+    print(recall_score(labs, preds, average='macro'))
+    print()
+    print(precision_score(labs, preds, average='macro'))
+    print()
     return
 
 
@@ -291,7 +305,7 @@ def get_oof(clf, x_train, y_train, x_test):
     oof_test_skf = numpy.empty((5, x_test.shape[0]))
     kf = KFold(n_splits=5, random_state=0)
 
-    for train_index, test_index in kf.split(x_train):
+    for i, (train_index, test_index) in enumerate(kf.split(x_train, y_train)):
         x_tr = x_train[train_index]
         y_tr = y_train[train_index]
         x_te = x_train[test_index]
@@ -299,13 +313,13 @@ def get_oof(clf, x_train, y_train, x_test):
         clf.fit(x_tr, y_tr)
 
         oof_train[test_index] = clf.predict(x_te)
-        oof_test_skf[test_index, :] = clf.predict(x_test)
+        oof_test_skf[i, :] = clf.predict(x_test)
 
     oof_test[:] = oof_test_skf.mean(axis=0)
     return oof_train.reshape(-1, 1), oof_test.reshape(-1, 1)
 
 
-def get_pad_sequences(data):
+def get_pad_sequences(data, embeddings_index):
     tokenizer_obj = Tokenizer()
     tokenizer_obj.fit_on_texts(data)
     sequences = tokenizer_obj.texts_to_sequences(data)
@@ -443,13 +457,25 @@ x_dev_count_vectors = add_feature(pandas.DataFrame(x_dev_count_vectors.todense()
 xtrain_tfidf = add_feature(pandas.DataFrame(xtrain_tfidf.todense()), train_features)
 xdev_tfidf = add_feature(pandas.DataFrame(xdev_tfidf.todense()), dev_features)
 
+
+cv_scaler = MinMaxScaler()
+cv_scaler.fit(x_train_count_vectors)
+x_train_count_vectors = cv_scaler.transform(x_train_count_vectors)
+x_dev_count_vectors = cv_scaler.transform(x_dev_count_vectors)
+
+tf_scaler = MinMaxScaler()
+tf_scaler.fit(xtrain_tfidf)
+xtrain_tfidf = tf_scaler.transform(xtrain_tfidf)
+xdev_tfidf = tf_scaler.transform(xdev_tfidf)
+
+
 training_labels = train_data['sentiment']
 test_labels = dev_data['sentiment']
 
 # WORD EMBEDDINGS
 # load the pre-trained word-embedding vectors
 
-
+'''
 embeddings_index = {}
 for i, line in enumerate(open('C:/Users/nacho/Downloads/cc.es.300.vec/cc.es.300.vec', encoding='utf-8')):
     if i % 100000 == 0:
@@ -457,8 +483,8 @@ for i, line in enumerate(open('C:/Users/nacho/Downloads/cc.es.300.vec/cc.es.300.
     values = line.split()
     embeddings_index[values[0]] = numpy.asarray(values[1:], dtype='float32')
 
-train_num_words, train_embedding_matrix, train_max_length, train_pad = get_pad_sequences(final_train_content)
-dev_num_words, dev_embedding_matrix, dev_max_length, dev_pad = get_pad_sequences(final_dev_content)
+train_num_words, train_embedding_matrix, train_max_length, train_pad = get_pad_sequences(final_train_content, embeddings_index)
+dev_num_words, dev_embedding_matrix, dev_max_length, dev_pad = get_pad_sequences(final_dev_content, embeddings_index)
 
 model = Sequential()
 embedding_layer = Embedding(train_num_words, 300, embeddings_initializer=Constant(train_embedding_matrix),
@@ -469,10 +495,11 @@ model.add(Dense(4, activation='softmax'))
 
 model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
-model.fit(train_pad, training_labels, batch_size=16, epochs=30, validation_data=(dev_pad, test_labels), verbose=2)
+model.fit(train_pad, training_labels, batch_size=16, epochs=10, validation_data=(dev_pad, test_labels), verbose=2)
 nn_predictions = model.predict_classes(dev_pad, batch_size=16, verbose=2)
 print("NN, Word Embeddings: ", get_model_accuracy(nn_predictions, test_labels))
 print_confusion_matrix(nn_predictions, test_labels)
+'''
 
 # NAIVE BAYES
 # Naive Bayes on Count Vectors
@@ -531,12 +558,78 @@ print_confusion_matrix(svm_word_predictions, test_labels)
 # ENSEMBLINGS
 voting_model = VotingClassifier(estimators=[
     ('lr', linear_model.LogisticRegression()),
-    ('svm', svm.LinearSVC())], voting='hard')
+    ('svm', svm.LinearSVC()),
+    ('nb', naive_bayes.MultinomialNB())], voting='hard')
 
 voting_classifier = train_model(voting_model, x_train_count_vectors, training_labels)
 voting_predictions = get_predictions(voting_classifier, x_dev_count_vectors)
 print("VOTING CLASSIFIER: ", get_model_accuracy(voting_predictions, test_labels))
 print_confusion_matrix(voting_predictions, test_labels)
+
+
+'''
+rf_params = {
+    'n_jobs': -1,
+    'n_estimators': 500,
+     'warm_start': True,
+     #'max_features': 0.2,
+    'max_depth': 6,
+    'min_samples_leaf': 2,
+    'max_features' : 'sqrt',
+    'verbose': 0
+}
+
+# Extra Trees Parameters
+et_params = {
+    'n_jobs': -1,
+    'n_estimators':500,
+    #'max_features': 0.5,
+    'max_depth': 8,
+    'min_samples_leaf': 2,
+    'verbose': 0
+}
+
+# AdaBoost parameters
+ada_params = {
+    'n_estimators': 500,
+    'learning_rate' : 0.75
+}
+
+# Gradient Boosting parameters
+gb_params = {
+    'n_estimators': 500,
+     #'max_features': 0.2,
+    'max_depth': 5,
+    'min_samples_leaf': 2,
+    'verbose': 0
+}
+
+# Support Vector Classifier parameters
+svc_params = {
+    'kernel' : 'linear',
+    'C' : 0.025
+    }
+
+rf = RandomForestClassifier(**rf_params)
+et = ExtraTreesClassifier(**et_params)
+ada = AdaBoostClassifier(**ada_params)
+gb = GradientBoostingClassifier(**gb_params)
+svc = svm.SVC(**svc_params)
+
+training_set = xtrain_tfidf
+test_set = xdev_tfidf
+
+rf_oof_train, rf_oof_test = get_oof(rf, training_set, training_labels, test_set)
+print("1")
+et_oof_train, et_oof_test = get_oof(et, training_set, training_labels, test_set)
+print("1")
+ada_oof_train, ada_oof_test = get_oof(ada, training_set, training_labels, test_set)
+print("1")
+gb_oof_train, gb_oof_test = get_oof(gb, training_set, training_labels, test_set)
+print("1")
+svc_oof_train, svc_oof_test = get_oof(svc, training_set, training_labels, test_set)
+print("1")
+'''
 
 '''
 nb_oof_train, nb_oof_test = get_oof(naive_bayes.MultinomialNB(), xtrain_tfidf, training_labels, xdev_tfidf)
@@ -553,11 +646,12 @@ xgboost_predictions = get_predictions(xgboost_classifier, xgb_dev)
 print("XGBOOST CLASSIFIER: ", get_model_accuracy(xgboost_predictions, test_labels))
 print_confusion_matrix(xgboost_predictions, test_labels)
 '''
+
 if CROSS_LINGUAL:
     cross = 'cross_'
 else:
     cross = ''
-with open(data_path + LANGUAGE_CODE + "/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
+with open(data_path + "final_outputs/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
     tsv_writer = csv.writer(out_file, delimiter='\t')
-    for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(svm_word_predictions)):
+    for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_word_predictions)):
         tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
