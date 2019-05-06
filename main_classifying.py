@@ -207,12 +207,11 @@ def camel_case_split(identifier):
 
 
 def libreoffice_processing(tokenized_data):
+    print("")
     result = []
     for tweet in tokenized_data:
         mini_result = []
         for word in tweet:
-            print("From " + word + " to")
-            print(next(iter(dictionary.suggest(word)), word))
             if not dictionary.spell(word):
                 mini_result.append(next(iter(dictionary.suggest(word)), word))
             else:
@@ -436,9 +435,13 @@ clean_train_content = tokenized_train_content  # remove_stopwords(tokenized_trai
 clean_dev_content = tokenized_dev_data  # remove_stopwords(tokenized_dev_data)
 '''
 
+# LIBRE OFFICE PROCESSING
+libreoffice_train_tweets = [TreebankWordDetokenizer().detokenize(row) for row in libreoffice_processing(tokenized_train_content)]
+libreoffice_dev_tweets = [TreebankWordDetokenizer().detokenize(row) for row in libreoffice_processing(tokenized_dev_data)]
+
 # LEMMATIZING
-lemmatized_train_tweets = lemmatize_list(libreoffice_processing(tokenized_train_content))
-lemmatized_dev_tweets = lemmatize_list(libreoffice_processing(tokenized_dev_data))
+lemmatized_train_tweets = lemmatize_list(libreoffice_train_tweets)
+lemmatized_dev_tweets = lemmatize_list(libreoffice_dev_tweets)
 
 # REMOVING ACCENTS
 without_accents_train = remove_accents(lemmatized_train_tweets)
