@@ -6,10 +6,19 @@ import nltk
 import unidecode
 import spacy
 import hunspell
-import os
+
 from scipy.sparse import coo_matrix, hstack
+import sys
+import os
+import zipfile
 
 import warnings
+
+# Append script path to import path to locate tass_eval
+sys.path.append(os.path.realpath(__file__))
+
+# Import evalTask1 function fro tass_eval module
+from tass_eval import evalTask1
 
 from re import finditer
 
@@ -24,15 +33,16 @@ from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_
 from sklearn.model_selection import KFold
 from gensim.models import Word2Vec
 
-import pandas, xgboost, numpy, textblob, string
-from keras.preprocessing import text, sequence
+import pandas as pd, numpy, textblob, string
+# import xgboost
+# from keras.preprocessing import text, sequence
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
-from keras import layers, models, optimizers
-from keras.models import Sequential
-from keras.layers import Dense, Embedding, LSTM, GRU
-from keras.layers.embeddings import Embedding
-from keras.initializers import Constant
+# from keras import layers, models, optimizers
+# from keras.models import Sequential
+# from keras.layers import Dense, Embedding, LSTM, GRU
+# from keras.layers.embeddings import Embedding
+# from keras.initializers import Constant
 
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 from collections import Counter
@@ -42,15 +52,27 @@ from textacy import keyterms
 warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
 warnings.filterwarnings(action='ignore', category=FutureWarning)
 
-LANGUAGE_CODE = 'cr'
+LANGUAGE_CODE = ['es', 'cr', 'mx', 'pe', 'uy']
+# CROSS_LINGUAL = [True, False]
+CROSS_LINGUAL = [True]
+bTestPhase = False  # If we are doing test, then concatenate train + dev, if not use dev as test
 
-dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="./LIBREOFFICE")  # In case you're using CyHunspell
-# dictionary = hunspell.HunSpell('./es_ANY.dic', "./es_ANY.aff")  # In case you're using Hunspell
+dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="./")  # In case you're using CyHunspell
+print("Loading Hunspell directory")
+# dictionary = hunspell.HunSpell('./Dict/es_ANY.dic', "./Dict/es_ANY.aff")  # In case you're using Hunspell
 
-CROSS_LINGUAL = False
 LABEL_ENCODER = preprocessing.LabelEncoder()
 TERNARY_LABEL_ENCODER = preprocessing.LabelEncoder()
-data_path = "./CODALAB/DATASETS/public_data_development/"
+data_path = "./public_data_development/"
+# data_path = "../TASS2019/DATASETS/public_data/"
+
+print("Loading Spacy Model")
+lemmatizer = spacy.load("es_core_news_sm")  # GLOBAL to avoid loading the model several times
+
+print("Loading NLTK stuff")
+stemmer = nltk.stem.SnowballStemmer('spanish')
+regex_uppercase = re.compile(r"\b[A-Z][A-Z]+\b")
+# stopwords = nltk.corpus.stopwords.words('spanish')
 
 emoji_pattern = re.compile("[" 
                            u"\U0001F600-\U0001F64F"  # emoticons
@@ -60,10 +82,6 @@ emoji_pattern = re.compile("["
                            u"\U00002702-\U000027B0"
                            u"\U000024C2-\U0001F251"
                            "]+", flags=re.UNICODE)
-
-print()
-print("Language: " + LANGUAGE_CODE)
-print()
 
 
 def get_dataframe_from_xml(data):
@@ -90,7 +108,7 @@ def get_dataframe_from_xml(data):
                 else:
                     ternary_sentiment.append(element.text)
 
-    result_df = pandas.DataFrame()
+    result_df = pd.DataFrame()
     result_df['tweet_id'] = tweet_id
     # result_df['user'] = user
     result_df['content'] = content
@@ -107,45 +125,33 @@ def get_dataframe_from_xml(data):
 
 
 def extract_length_feature(tokenized_dataframe):
+    print("Extracting length feature")
     return [len(tweet) for tweet in tokenized_dataframe]
 
 
 def extract_uppercase_feature(dataframe):
-    regex = re.compile(r"\b[A-Z][A-Z]+\b")
-    result = []
-    for tweet in dataframe:
-        result.append(len(regex.findall(tweet)))
-    return result
+    print("Extracting uppercase feature")
+    return [len(regex_uppercase.findall(tweet)) for tweet in dataframe]
+
+
+def extract_hashtag_number_feature(dataframe):
+    print("Extracting hashtag numbers feature")
+    return[tweet.count('#') for tweet in dataframe]
 
 
 def extract_question_mark_feature(dataframe):
-    result = []
-    for tweet in dataframe:
-        if re.search(r"[/?/]", tweet):
-            result.append(1)
-        else:
-            result.append(0)
-    return result
+    print("Extracting question mark")
+    return [1 if re.search(r"[/?/]", tweet) is True else 0 for tweet in dataframe]
 
 
 def extract_exclamation_mark_feature(dataframe):
-    result = []
-    for tweet in dataframe:
-        if re.search(r"[/!/]", tweet):
-            result.append(1)
-        else:
-            result.append(0)
-    return result
+    print("Extracting exclamation mark")
+    return [1 if re.search(r"[/!/]", tweet) is True else 0 for tweet in dataframe]
 
 
 def extract_letter_repetition_feature(dataframe):
-    result = []
-    for tweet in dataframe:
-        if re.search(r"(\w)(\1{2,})", tweet):
-            result.append(1)
-        else:
-            result.append(0)
-    return result
+    print("Extracting letter repetition")
+    return [1 if re.search(r"(\w)(\1{2,})", tweet) is True else 0 for tweet in dataframe]
 
 
 def extract_sent_words_feature(tokenized_data, data_feed):
@@ -170,6 +176,7 @@ def extract_sent_words_feature(tokenized_data, data_feed):
 
 
 def get_sentiment_vocabulary(data, positive, negative):
+    print("Sentiment Vocabulary Extraction")
     pos_neg_tweets = []
     pos_neg_bool_labels = []
     for index, tweet in enumerate(data):
@@ -215,50 +222,33 @@ def libreoffice_processing(tokenized_data):
 
 
 def tokenize_list(datalist):
-    result = []
-    for row in datalist:
-        result.append(nltk.word_tokenize(row))
-    return result
+    print("Tokenizing")
+    return [nltk.word_tokenize(row) for row in datalist]
 
 
 def remove_accents(tokenized_data):
-    result = []
-    for tweet in tokenized_data:
-        result.append([unidecode.unidecode(word) for word in tweet])
-    return result
+    print("Removing accents")
+    return [[unidecode.unidecode(word) for word in tweet] for tweet in tokenized_data]
 
 
 def remove_stopwords(tokenized_data):
-    result = []
-    for row in tokenized_data:
-        result.append([word for word in row if word not in nltk.corpus.stopwords.words('spanish')])
-    return result
+    print('Removing stopwords')
+    return [[word for word in row if word not in stopwords] for row in tokenized_data]
 
 
 def stem_list(datalist):
-    stemmer = nltk.stem.SnowballStemmer('spanish')
-    result = []
-    for row in datalist:
-        stemmed_words = [stemmer.stem(word) for word in row]
-        result.append(stemmed_words)
-    return result
+    print("Applying stemming")
+    return [[stemmer.stem(word) for word in row] for row in datalist]
 
 
 def lemmatize_list(datalist):
-    lemmatizer = spacy.load("es_core_news_sm")
     print("Lemmatizing data...")
-    result = []
-    i = 0
-    for row in datalist:
-        mini_result = []
-        mini_result = [token.lemma_ for token in lemmatizer(row)]
-        result.append(mini_result)
-        i += 1
-    return result
+    return [[token.lemma_ for token in lemmatizer(row)] for row in datalist]
 
 
 def perform_count_vectors(train_set_x, valid_set_x):
     # create a count vectorizer object
+    print("Count word level")
     count_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}')
     count_vect.fit(train_set_x)
 
@@ -267,27 +257,25 @@ def perform_count_vectors(train_set_x, valid_set_x):
 
 
 def perform_tf_idf_vectors(train_set_x, valid_set_x):
-    # word level tf-idf
+    print("word level tf-idf")
     tfidf_vect = TfidfVectorizer(analyzer='word', token_pattern=r'\w{1,}', max_features=5000)
     tfidf_vect.fit(train_set_x)
-    tr_tfidf = tfidf_vect.transform(train_set_x)
-    val_tfidf = tfidf_vect.transform(valid_set_x)
-
-    return tr_tfidf, val_tfidf
+    return tfidf_vect.transform(train_set_x), tfidf_vect.transform(valid_set_x)
 
 
 def add_feature(matrix, new_features):
     result = matrix
     for feature_vector in new_features:
-        result = pandas.concat([result, feature_vector], axis=1)
+        result = pd.concat([result, feature_vector], axis=1)
     return result
 
 
 def train_model(classifier, x_train, y_train, x_test, y_test, clf_name, description=''):
     classifier.fit(x_train, y_train)
     predictions = get_predictions(classifier, x_test)
-    print(clf_name + ", " + description + ":" + str(get_model_accuracy(predictions, y_test)))
-    print_confusion_matrix(predictions, y_test)
+    if y_test is not None:
+        print(clf_name + ", " + description + ":" + str(get_model_accuracy(predictions, y_test)))
+        print_confusion_matrix(predictions, y_test)
     return classifier, predictions
 
 
@@ -300,9 +288,9 @@ def get_model_accuracy(predictions, validation_labels):
 
 
 def print_confusion_matrix(predictions, labels):
-    preds = pandas.Series(predictions, name='Predicted')
-    labs = pandas.Series(labels, name='Actual')
-    df_confusion = pandas.crosstab(labs, preds)
+    preds = pd.Series(predictions, name='Predicted')
+    labs = pd.Series(labels, name='Actual')
+    df_confusion = pd.crosstab(labs, preds)
     print(df_confusion)
     print()
     prec = precision_score(labs, preds, average='macro')
@@ -312,7 +300,7 @@ def print_confusion_matrix(predictions, labels):
     print()
     print("Recall: " + str(rec))
     print()
-    print("Precision" + str(prec))
+    print("Precision: " + str(prec))
     print()
     return
 
@@ -367,257 +355,397 @@ def get_pad_sequences(data, embeddings_index):
     return num_words, embedding_matrix, max_length, tweet_pad
 
 
-# GET THE DATA
-if CROSS_LINGUAL:
-    parser_es = ET.XMLParser(encoding='utf-8')
-    parser_uy = ET.XMLParser(encoding='utf-8')
-    parser_pe = ET.XMLParser(encoding='utf-8')
-    parser_cr = ET.XMLParser(encoding='utf-8')
-    tree_es = ET.parse(data_path + "es/intertass_es_train.xml", parser=parser_es)
-    tree_uy = ET.parse(data_path + "uy/intertass_uy_train.xml", parser=parser_uy)
-    tree_pe = ET.parse(data_path + "pe/intertass_pe_train.xml", parser=parser_pe)
-    tree_cr = ET.parse(data_path + "cr/intertass_cr_train.xml", parser=parser_cr)
-    es_df = get_dataframe_from_xml(tree_es)
-    uy_df = get_dataframe_from_xml(tree_uy)
-    pe_df = get_dataframe_from_xml(tree_pe)
-    cr_df = get_dataframe_from_xml(tree_cr)
-    if LANGUAGE_CODE == 'es':
-        dev_data = es_df
-        train_data = pandas.concat([uy_df, pe_df, cr_df], ignore_index=True)
-    elif LANGUAGE_CODE == 'uy':
-        dev_data = uy_df
-        train_data = pandas.concat([es_df, pe_df, cr_df], ignore_index=True)
-    elif LANGUAGE_CODE == 'pe':
-        dev_data = pe_df
-        train_data = pandas.concat([uy_df, es_df, cr_df], ignore_index=True)
-    else :
-        dev_data = cr_df
-        train_data = pandas.concat([uy_df, pe_df, es_df], ignore_index=True)
-else:
-    parser_dev = ET.XMLParser(encoding='utf-8')
-    parser_train = ET.XMLParser(encoding='utf-8')
-    tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
-    tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
-    train_data = get_dataframe_from_xml(tree_train)
-    dev_data = get_dataframe_from_xml(tree_dev)
+# Create a zip file for a folder
+def zipdir(path, ziph):
+    # ziph is zipfile handle
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            ziph.write(os.path.join(root, file))
 
 
-# PRE-PROCESSING
-preprocessed_train_content = text_preprocessing(train_data['content'])
-preprocessed_dev_content = text_preprocessing(dev_data['content'])
+def read_files(sLang, bCross):
+    train_data = pd.DataFrame()
+    dev_data = pd.DataFrame()
+    tst_data = None
 
-# TOKENIZE
-tokenized_train_content = tokenize_list(preprocessed_train_content)
-tokenized_dev_data = tokenize_list(preprocessed_dev_content)
+    if bCross is True:
+        dev_cross_data = pd.DataFrame()
+        for sLangCross in [x for x in LANGUAGE_CODE if x != sLang]:
+            tree_train_cross = ET.parse(data_path + sLangCross + "/intertass_" + sLangCross + "_train.xml")
+            df_train_cross = get_dataframe_from_xml(tree_train_cross)
 
-# FEATURE EXTRACTION
-train_data['tweet_length'] = extract_length_feature(tokenized_train_content)
-dev_data['tweet_length'] = extract_length_feature(tokenized_dev_data)
+            tree_dev_cross = ET.parse(data_path + sLangCross + "/intertass_" + sLangCross + "_dev.xml")
+            df_dev_cross = get_dataframe_from_xml(tree_dev_cross)
 
-train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
-dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
+            train_data = pd.concat([train_data, df_train_cross], ignore_index=True)
+            dev_cross_data = pd.concat([dev_cross_data, df_dev_cross], ignore_index=True)
 
-train_data['question_mark'] = extract_question_mark_feature(train_data['content'])
-dev_data['question_mark'] = extract_question_mark_feature(dev_data['content'])
+        # We add train_cross + dev_cross (but never we can add dev_lang)
+        train_data = pd.concat([train_data, dev_cross_data], ignore_index=True)
 
-train_data['exclamation_mark'] = extract_exclamation_mark_feature(train_data['content'])
-dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['content'])
+    else:
+        tree_train = ET.parse(data_path + sLang + "/intertass_" + sLang + "_train.xml")
+        train_data = get_dataframe_from_xml(tree_train)
 
-train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
-dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
+    if bTestPhase is True:
+        tree_tst = ET.parse(data_path + sLang + "/intertass_" + sLang + "_test.xml")
+        tst_data = get_dataframe_from_xml(tree_tst)
+    else:  # When working with cross or mono, we can only use dev_lang
+        tree_dev = ET.parse(data_path + sLang + "/intertass_" + sLang + "_dev.xml")
+        dev_data = get_dataframe_from_xml(tree_dev)
 
-train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = \
-    extract_sent_words_feature(tokenized_train_content, tokenized_train_content)
-dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = \
-    extract_sent_words_feature(tokenized_dev_data, tokenized_train_content)
-
-
-# clean_train_content = tokenized_train_content  # remove_stopwords(tokenized_train_content)
-# clean_dev_content = tokenized_dev_data  # remove_stopwords(tokenized_dev_data)
-# '''
-
-# LIBRE OFFICE PROCESSING
-# libreoffice_train_tweets = [TreebankWordDetokenizer().detokenize(row)
-#                             for row in libreoffice_processing(tokenized_train_content)]
-# libreoffice_dev_tweets = [TreebankWordDetokenizer().detokenize(row)
-#                           for row in libreoffice_processing(tokenized_dev_data)]
-
-# LEMMATIZING
-lemmatized_train_tweets = lemmatize_list(preprocessed_train_content)
-lemmatized_dev_tweets = lemmatize_list(preprocessed_dev_content)
-print()
-#
-# # REMOVING ACCENTS
-# without_accents_train = remove_accents(lemmatized_train_tweets)
-# without_accents_dev = remove_accents(lemmatized_dev_tweets)
-
-final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_train_tweets]
-final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_dev_tweets]
-
-# COUNT VECTORS
-x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_dev_content)
-
-# TF-IDF VECTORS
-xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
-
-train_features = [
-    train_data['tweet_length'],
-    train_data['has_uppercase'],
-    train_data['exclamation_mark'],
-    train_data['question_mark'],
-    train_data['pos_voc'],
-    train_data['neg_voc'],
-    # train_data['neu_voc'],
-    train_data['none_voc'],
-    train_data['letter_repetition']
-]
-
-dev_features = [
-    dev_data['tweet_length'],
-    dev_data['has_uppercase'],
-    dev_data['exclamation_mark'],
-    dev_data['question_mark'],
-    dev_data['pos_voc'],
-    dev_data['neg_voc'],
-    # dev_data['neu_voc'],
-    dev_data['none_voc'],
-    dev_data['letter_repetition']
-]
-
-x_train_count_vectors = add_feature(pandas.DataFrame(x_train_count_vectors.todense()), train_features)
-x_dev_count_vectors = add_feature(pandas.DataFrame(x_dev_count_vectors.todense()), dev_features)
-
-xtrain_tfidf = add_feature(pandas.DataFrame(xtrain_tfidf.todense()), train_features)
-xdev_tfidf = add_feature(pandas.DataFrame(xdev_tfidf.todense()), dev_features)
-
-training_set = x_train_count_vectors
-test_set = x_dev_count_vectors
-
-training_labels = train_data['sentiment']
-test_labels = dev_data['sentiment']
-
-# scaler = MinMaxScaler()
-# scaler.fit(training_set)
-# training_set = scaler.transform(training_set)
-# test_set = scaler.transform(test_set)
-
-# WORD EMBEDDINGS
-# load the pre-trained word-embedding vectors
+    return train_data, dev_data, tst_data
 
 
-# embeddings_index = {}
-# for i, line in enumerate(open('./VECTOR_EMBEDDINGS/cc.es.300.vec', encoding='utf-8')):
-#     if i % 100000 == 0:
-#         print(i)
-#     values = line.split()
-#     embeddings_index[values[0]] = numpy.asarray(values[1:], dtype='float32')
-#
-# train_num_words, train_embedding_matrix, train_max_length, train_pad = get_pad_sequences(final_train_content, embeddings_index)
-# dev_num_words, dev_embedding_matrix, dev_max_length, dev_pad = get_pad_sequences(final_dev_content, embeddings_index)
-#
-# model = Sequential()
-# embedding_layer = Embedding(train_num_words, 300, embeddings_initializer=Constant(train_embedding_matrix),
-#                             input_length=train_max_length, trainable=False)
-# model.add(embedding_layer)
-# model.add(GRU(units=16, dropout=0.5, recurrent_dropout=0.5, return_sequences=True))
-# model.add(Dense(4, activation='softmax'))
-#
-# model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-#
-# model.fit(train_pad, training_labels, batch_size=16, epochs=10, validation_data=(dev_pad, test_labels), verbose=2)
-# nn_predictions = model.predict_classes(dev_pad, batch_size=16, verbose=2)
-#
-# from keras.models import Model
-#
-# embedding_layer = Embedding(train_num_words, 300, embeddings_initializer=Constant(train_embedding_matrix),
-#                             input_length=train_max_length, trainable=False)
-# gru = GRU(units=16, dropout=0.5, recurrent_dropout=0.5, return_sequences=True)(embedding_layer)
-# d = Dense(4, activation='softmax')(gru)
-# model = Model(inputs=embedding_layer, outputs=d)
-# model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-#
-# model.fit(train_pad, training_labels, batch_size=16, epochs=10, validation_data=(dev_pad, test_labels), verbose=2)
-# nn_predictions = model.predict_classes(dev_pad, batch_size=16, verbose=2)
-#
-# print("NN, Word Embeddings: ", get_model_accuracy(nn_predictions, test_labels))
-# print_confusion_matrix(nn_predictions, test_labels)
+if __name__ == '__main__':
+
+    # GET THE DATA
+    output_dir = data_path + "final_outputs/"
+    for bCross in CROSS_LINGUAL:
+        print('----------------- CROSS : ' + str(bCross) + ' ----------------')
+
+        prefix = 'LR'
+
+        if bCross is True:
+            output_dir = output_dir + '/cross/'
+        else:
+            output_dir = output_dir + '/mono/'
+
+        for sLang in LANGUAGE_CODE:
+            print('** LANG: ' + sLang)
+
+            train_data, dev_data, tst_data = read_files(sLang, bCross)
+
+            # PRE-PROCESSING
+            preprocessed_train_content = text_preprocessing(train_data['content'])
+            preprocessed_dev_content = text_preprocessing(dev_data['content'])
+            if bTestPhase is True:
+                preprocessed_tst_content = text_preprocessing(tst_data['content'])
+
+            # TOKENIZE
+            tokenized_train_content = tokenize_list(preprocessed_train_content)
+            tokenized_dev_content = tokenize_list(preprocessed_dev_content)
+            if bTestPhase is True:
+                tokenized_tst_data = tokenize_list(preprocessed_tst_content)
+
+            # FEATURE EXTRACTION
+            train_data['tweet_length'] = extract_length_feature(tokenized_train_content)
+            dev_data['tweet_length'] = extract_length_feature(tokenized_dev_content)
+            if bTestPhase is True:
+                tst_data['tweet_length'] = extract_length_feature(tokenized_tst_data)
+
+            train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
+            dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
+            if bTestPhase is True:
+                tst_data['has_uppercase'] = extract_uppercase_feature(tst_data['content'])
+
+            train_data['question_mark'] = extract_question_mark_feature(train_data['content'])
+            dev_data['question_mark'] = extract_question_mark_feature(dev_data['content'])
+            if bTestPhase is True:
+                tst_data['question_mark'] = extract_question_mark_feature(tst_data['content'])
+
+            train_data['exclamation_mark'] = extract_exclamation_mark_feature(train_data['content'])
+            dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['content'])
+            if bTestPhase is True:
+                tst_data['exclamation_mark'] = extract_exclamation_mark_feature(tst_data['content'])
+
+            train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
+            dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
+            if bTestPhase is True:
+                tst_data['letter_repetition'] = extract_letter_repetition_feature(tst_data['content'])
+
+            train_data['hashtag_number'] = extract_hashtag_number_feature(train_data['content'])
+            dev_data['hashtag_number'] = extract_hashtag_number_feature(dev_data['content'])
+            if bTestPhase is True:
+                tst_data['hashtag_number'] = extract_hashtag_number_feature(tst_data['content'])
+
+            train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = \
+                extract_sent_words_feature(tokenized_train_content, tokenized_train_content)
+            dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = \
+                extract_sent_words_feature(tokenized_dev_content, tokenized_train_content)
+            if bTestPhase is True:
+                tst_data['pos_voc'], tst_data['neg_voc'], tst_data['neu_voc'], tst_data['none_voc'] = \
+                    extract_sent_words_feature(tokenized_tst_data, tokenized_train_content)
+
+            # clean_train_content = tokenized_train_content  # remove_stopwords(tokenized_train_content)
+            # clean_dev_content = tokenized_dev_data  # remove_stopwords(tokenized_dev_data)
+            # if bTestPhase is True:
+            #     clean_tst_content = tokenized_tst_data  # remove_stopwords(tokenized_tst_data)
+
+            # LIBRE OFFICE PROCESSING
+            # libreoffice_train_tweets = [TreebankWordDetokenizer().detokenize(row)
+            #                             for row in libreoffice_processing(tokenized_train_content)]
+            # libreoffice_dev_tweets = [TreebankWordDetokenizer().detokenize(row)
+            #                           for row in libreoffice_processing(tokenized_dev_data)]
+            # libreoffice_tst_tweets = [TreebankWordDetokenizer().detokenize(row)
+            #                           for row in libreoffice_processing(tokenized_tst_data)]
 
 
-# CLASSIFIERS
-nb = naive_bayes.MultinomialNB()
-lr = linear_model.LogisticRegression()
-dt = tree.DecisionTreeClassifier()
-svm = svm.LinearSVC()
-rf = RandomForestClassifier()
-et = ExtraTreesClassifier()
-ada = AdaBoostClassifier()
-gb = GradientBoostingClassifier()
+            # LEMMATIZING
+            lemmatized_train_tweets = lemmatize_list(preprocessed_train_content)
+            lemmatized_dev_tweets = lemmatize_list(preprocessed_dev_content)
+            if bTestPhase is True:
+                lemmatized_tst_tweets = lemmatize_list(preprocessed_tst_content)
+            #
+            # # REMOVING ACCENTS
+            # without_accents_train = remove_accents(lemmatized_train_tweets)
+            # without_accents_dev = remove_accents(lemmatized_dev_tweets)
+            # if bTestPhase is True:
+            #   without_accents_tst = remove_accents(lemmatized_tst_tweets)
 
-nb_classifier, nb_predictions = train_model(nb, training_set, training_labels, test_set, test_labels, 'NB')
-lr_classifier, lr_predictions = train_model(lr, training_set, training_labels, test_set, test_labels, 'LR')
-dt_classifier, dt_predictions = train_model(dt, training_set, training_labels, test_set, test_labels, 'DT')
-svm_classifier, svm_predictions = train_model(svm, training_set, training_labels, test_set, test_labels, 'SVM')
-rf_classifier, rf_predictions = train_model(rf, training_set, training_labels, test_set, test_labels, 'RF')
-et_classifier, et_predictions = train_model(et, training_set, training_labels, test_set, test_labels, 'ET')
-ada_classifier, ada_predictions = train_model(ada, training_set, training_labels, test_set, test_labels, 'ADA')
-gb_classifier, gb_predictions = train_model(gb, training_set, training_labels, test_set, test_labels, 'GB')
+            final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_train_tweets]
+            final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_dev_tweets]
+            if bTestPhase is True:
+                final_tst_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_tst_tweets]
 
-
-# # ENSEMBLINGS
-# voting_model = VotingClassifier(estimators=[
-#     ('lr', linear_model.LogisticRegression()),
-#     ('svm', svm.LinearSVC()),
-#     ('nb', naive_bayes.MultinomialNB())], voting='hard')
-#
-# voting_classifier = train_model(voting_model, x_train_count_vectors, training_labels)
-# voting_predictions = get_predictions(voting_classifier, x_dev_count_vectors)
-# print("VOTING CLASSIFIER: ", get_model_accuracy(voting_predictions, test_labels))
-# print_confusion_matrix(voting_predictions, test_labels)
-
-# rf_oof_train, rf_oof_test = get_oof(rf, training_set, training_labels, test_set)
-# print("1")
-# et_oof_train, et_oof_test = get_oof(et, training_set, training_labels, test_set)
-# print("1")
-# ada_oof_train, ada_oof_test = get_oof(ada, training_set, training_labels, test_set)
-# print("1")
-# gb_oof_train, gb_oof_test = get_oof(gb, training_set, training_labels, test_set)
-# print("1")
-# svc_oof_train, svc_oof_test = get_oof(svc, training_set, training_labels, test_set)
-# print("1")
+            # COUNT VECTORS
+            if bTestPhase is True and bCross is True:  # Add train + dev to have more data
+                x_train_count_vectors, x_tst_count_vectors = perform_count_vectors(final_train_content, final_tst_content)
+            elif bTestPhase is True:
+                x_train_count_vectors, x_tst_count_vectors = perform_count_vectors(final_train_content + final_dev_content,
+                                                                                                        final_tst_content)
+            else:
+                x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_dev_content)
 
 
-# nb_oof_train, nb_oof_test = get_oof(naive_bayes.MultinomialNB(), xtrain_tfidf, training_labels, xdev_tfidf)
-# lr_oof_train, lr_oof_test = get_oof(linear_model.LogisticRegression(), xtrain_tfidf, training_labels, xdev_tfidf)
-# svm_oof_train, svm_oof_test = get_oof(svm.LinearSVC(), xtrain_tfidf, training_labels, xdev_tfidf)
+            # TF-IDF VECTORS
+            if bTestPhase is True and bCross is True:
+                xtrain_tfidf, xtst_tfidf = perform_tf_idf_vectors(final_train_content, final_tst_content)
+            elif bTestPhase is True:
+                xtrain_tfidf, xtst_tfidf = perform_tf_idf_vectors(final_train_content + final_dev_content, final_tst_content)
+            else:
+                xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
+
+            train_features = [
+                train_data['tweet_length'],
+                train_data['has_uppercase'],
+                train_data['exclamation_mark'],
+                train_data['question_mark'],
+                train_data['hashtag_number'],
+                train_data['pos_voc'],
+                train_data['neg_voc'],
+                # train_data['neu_voc'],
+                train_data['none_voc'],
+                train_data['letter_repetition']
+            ]
+
+            dev_features = [
+                dev_data['tweet_length'],
+                dev_data['has_uppercase'],
+                dev_data['exclamation_mark'],
+                dev_data['question_mark'],
+                dev_data['hashtag_number'],
+                dev_data['pos_voc'],
+                dev_data['neg_voc'],
+                # dev_data['neu_voc'],
+                dev_data['none_voc'],
+                dev_data['letter_repetition']
+            ]
+
+            if bTestPhase is True:
+                tst_features = [
+                    tst_data['tweet_length'],
+                    tst_data['has_uppercase'],
+                    tst_data['exclamation_mark'],
+                    tst_data['question_mark'],
+                    tst_data['hashtag_number'],
+                    tst_data['pos_voc'],
+                    tst_data['neg_voc'],
+                    # tst_data['neu_voc'],
+                    tst_data['none_voc'],
+                    tst_data['letter_repetition']
+                ]
+
+            if bTestPhase is True and bCross is True:  # Use train_dev_cross + dev
+                x_train_count_vectors = add_feature(pd.DataFrame(x_train_count_vectors.todense()), train_features)
+                x_tst_count_vectors = add_feature(pd.DataFrame(x_tst_count_vectors.todense()), tst_features)
+            elif bTestPhase is True:  # Combine train + dev
+                x_train_count_vectors = add_feature(pd.concat([pd.DataFrame(x_train_count_vectors.todense()),
+                                                               pd.DataFrame(x_dev_count_vectors.todense())]),
+                                                    train_features + dev_features)
+                x_tst_count_vectors = add_feature(pd.DataFrame(x_tst_count_vectors.todense()), tst_features)
+            else:
+                x_train_count_vectors = add_feature(pd.DataFrame(x_train_count_vectors.todense()), train_features)
+                x_dev_count_vectors = add_feature(pd.DataFrame(x_dev_count_vectors.todense()), dev_features)
+
+            if bTestPhase is True and bCross is True:  # Use train_dev_cross + dev
+                xtrain_tfidf = add_feature(pd.DataFrame(xtrain_tfidf.todense()), train_features)
+                xtst_tfidf = add_feature(pd.DataFrame(xtst_tfidf.todense()), tst_features)
+            elif bTestPhase is True:  # Combine train + dev
+                xtrain_tfidf = add_feature(pd.concat([pd.DataFrame(xtrain_tfidf.todense()),
+                                                      pd.DataFrame(xdev_tfidf.todense())]),
+                                                     train_features + dev_features)
+                xtst_tfidf = add_feature(pd.DataFrame(xtst_tfidf.todense()), tst_features)
+
+            else:
+                xtrain_tfidf = add_feature(pd.DataFrame(xtrain_tfidf.todense()), train_features)
+                xdev_tfidf = add_feature(pd.DataFrame(xdev_tfidf.todense()), dev_features)
+
+            training_set = x_train_count_vectors
+            training_labels = train_data['sentiment']
+            if bTestPhase is True:
+                tst_set = x_tst_count_vectors
+                tst_labels = None  # We don't have the test labels right now
+            else:
+                dev_set = x_dev_count_vectors
+                dev_labels = dev_data['sentiment']
+
+            # scaler = MinMaxScaler()
+            # scaler.fit(training_set)
+            # training_set = scaler.transform(training_set)
+            # if bTestPhase is True:
+                # tst_set = scaler.transform(tst_set)
+            # else:
+                # dev_set = scaler.transform(dev_set)
+
+            # WORD EMBEDDINGS
+            # load the pre-trained word-embedding vectors
+
+            # embeddings_index = {}
+            # for i, line in enumerate(open('./VECTOR_EMBEDDINGS/cc.es.300.vec', encoding='utf-8')):
+            #     if i % 100000 == 0:
+            #         print(i)
+            #     values = line.split()
+            #     embeddings_index[values[0]] = numpy.asarray(values[1:], dtype='float32')
+            #
+            # train_num_words, train_embedding_matrix, train_max_length, train_pad = get_pad_sequences(final_train_content, embeddings_index)
+            # if bTestPhase is True:
+                # tst_num_words, tst_embedding_matrix, tst_max_length, tst_pad = get_pad_sequences(final_tst_content, embeddings_index)
+            # else:
+                # dev_num_words, dev_embedding_matrix, dev_max_length, dev_pad = get_pad_sequences(final_dev_content, embeddings_index)
+            #
+            # model = Sequential()
+            # embedding_layer = Embedding(train_num_words, 300, embeddings_initializer=Constant(train_embedding_matrix),
+            #                             input_length=train_max_length, trainable=False)
+            # model.add(embedding_layer)
+            # model.add(GRU(units=16, dropout=0.5, recurrent_dropout=0.5, return_sequences=True))
+            # model.add(Dense(4, activation='softmax'))
+            #
+            # model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+            #
+            # if bTestPhase is True:
+                # model.fit(train_pad, training_labels, batch_size=16, epochs=10, verbose=2)
+                # nn_predictions_tst = model.predict_classes(tst_pad, batch_size=16, verbose=2)
+            # else:
+                # model.fit(train_pad, training_labels, batch_size=16, epochs=10, validation_data=(dev_pad, dev_labels), verbose=2)
+                # nn_predictions_dev = model.predict_classes(dev_pad, batch_size=16, verbose=2)
+            #
+            # from keras.models import Model
+            #
+            # embedding_layer = Embedding(train_num_words, 300, embeddings_initializer=Constant(train_embedding_matrix),
+            #                             input_length=train_max_length, trainable=False)
+            # gru = GRU(units=16, dropout=0.5, recurrent_dropout=0.5, return_sequences=True)(embedding_layer)
+            # d = Dense(4, activation='softmax')(gru)
+            # model = Model(inputs=embedding_layer, outputs=d)
+            # model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+            #
+            # if bTestPhase is True:
+                # model.fit(train_pad, training_labels, batch_size=16, epochs=10, validation_data=(tst_pad, tst_labels), verbose=2)
+                # nn_predictions_tst = model.predict_classes(tst_pad, batch_size=16, verbose=2)
+            # else:
+                # model.fit(train_pad, training_labels, batch_size=16, epochs=10, validation_data=(dev_pad, dev_labels), verbose=2)
+                # nn_predictions_dev = model.predict_classes(dev_pad, batch_size=16, verbose=2)
+                # print("NN, Word Embeddings DEV: ", get_model_accuracy(nn_predictions, dev_labels))
+                # print_confusion_matrix(nn_predictions, dev_labels)
 
 
-# xgb_train = numpy.concatenate((nb_oof_train, lr_oof_train, svm_oof_train), axis=1)
-# xgb_dev = numpy.concatenate((nb_oof_test, lr_oof_test, svm_oof_test), axis=1)
-#
-# xgboost_model = xgboost.XGBClassifier(random_state=1, learning_rate=0.01)
-# xgboost_classifier = train_model(xgboost_model, xgb_train, training_labels)
-# xgboost_predictions = get_predictions(xgboost_classifier, xgb_dev)
-# print("XGBOOST CLASSIFIER: ", get_model_accuracy(xgboost_predictions, test_labels))
-# print_confusion_matrix(xgboost_predictions, test_labels)
+            # CLASSIFIERS
+            lr = linear_model.LogisticRegression()
+            # nb = naive_bayes.MultinomialNB()
+            # dt = tree.DecisionTreeClassifier()
+            # svm = svm.LinearSVC()
+            # rf = RandomForestClassifier()
+            # et = ExtraTreesClassifier()
+            # ada = AdaBoostClassifier()
+            # gb = GradientBoostingClassifier()
+
+            if bTestPhase is True:
+                lr_classifier, lr_predictions = train_model(lr, training_set, training_labels, tst_set, tst_labels, 'LR')
+                # nb_classifier, nb_predictions = train_model(nb, training_set, training_labels, tst_set, tst_labels, 'NB')
+                # dt_classifier, dt_predictions = train_model(dt, training_set, training_labels, tst_set, tst_labels, 'DT')
+                # svm_classifier, svm_predictions = train_model(svm, training_set, training_labels, tst_set, tst_labels, 'SVM')
+                # rf_classifier, rf_predictions = train_model(rf, training_set, training_labels, tst_set, tst_labels, 'RF')
+                # et_classifier, et_predictions = train_model(et, training_set, training_labels, tst_set, tst_labels, 'ET')
+                # ada_classifier, ada_predictions = train_model(ada, training_set, training_labels, tst_set, tst_labels, 'ADA')
+                # gb_classifier, gb_predictions = train_model(gb, training_set, training_labels, tst_set, tst_labels, 'GB')
+            else:
+                lr_classifier, lr_predictions = train_model(lr, training_set, training_labels, dev_set, dev_labels, 'LR')
+                # nb_classifier, nb_predictions = train_model(nb, training_set, training_labels, dev_set, dev_labels, 'NB')
+                # dt_classifier, dt_predictions = train_model(dt, training_set, training_labels, dev_set, dev_labels, 'DT')
+                # svm_classifier, svm_predictions = train_model(svm, training_set, training_labels, dev_set, dev_labels, 'SVM')
+                # rf_classifier, rf_predictions = train_model(rf, training_set, training_labels, dev_set, dev_labels, 'RF')
+                # et_classifier, et_predictions = train_model(et, training_set, training_labels, dev_set, dev_labels, 'ET')
+                # ada_classifier, ada_predictions = train_model(ada, training_set, training_labels, dev_set, dev_labels, 'ADA')
+                # gb_classifier, gb_predictions = train_model(gb, training_set, training_labels, dev_set, dev_labels, 'GB')
 
 
+            # # ENSEMBLINGS
+            # voting_model = VotingClassifier(estimators=[
+            #     ('lr', linear_model.LogisticRegression()),
+            #     ('svm', svm.LinearSVC()),
+            #     ('nb', naive_bayes.MultinomialNB())], voting='hard')
+            #
+            # voting_classifier = train_model(voting_model, x_train_count_vectors, training_labels)
+            # voting_predictions = get_predictions(voting_classifier, x_dev_count_vectors)
+            # print("VOTING CLASSIFIER: ", get_model_accuracy(voting_predictions, dev_labels))
+            # print_confusion_matrix(voting_predictions, dev_labels)
 
-if CROSS_LINGUAL:
-    cross = 'cross_'
-else:
-    cross = ''
-
-if os.path.exists(data_path + "final_outputs/") is False:
-    print("Creating output directory " + data_path + "final_outputs/")
-    os.makedirs(data_path + "final_outputs/")
-
-# with open(data_path + "final_outputs/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
-#     tsv_writer = csv.writer(out_file, delimiter='\t')
-#     for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_word_predictions)):
-#         tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
+            # rf_oof_train, rf_oof_test = get_oof(rf, training_set, training_labels, dev_set)
+            # print("1")
+            # et_oof_train, et_oof_test = get_oof(et, training_set, training_labels, dev_set)
+            # print("1")
+            # ada_oof_train, ada_oof_test = get_oof(ada, training_set, training_labels, dev_set)
+            # print("1")
+            # gb_oof_train, gb_oof_test = get_oof(gb, training_set, training_labels, dev_set)
+            # print("1")
+            # svc_oof_train, svc_oof_test = get_oof(svc, training_set, training_labels, dev_set)
+            # print("1")
 
 
-with open(data_path + "final_outputs/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
-    tsv_writer = csv.writer(out_file, delimiter='\t')
-    for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_predictions)):
-        tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
+            # nb_oof_train, nb_oof_dev = get_oof(naive_bayes.MultinomialNB(), xtrain_tfidf, training_labels, xdev_tfidf)
+            # lr_oof_train, lr_oof_dev = get_oof(linear_model.LogisticRegression(), xtrain_tfidf, training_labels, xdev_tfidf)
+            # svm_oof_train, svm_oof_dev = get_oof(svm.LinearSVC(), xtrain_tfidf, training_labels, xdev_tfidf)
+
+
+            # xgb_train = numpy.concatenate((nb_oof_train, lr_oof_train, svm_oof_train), axis=1)
+            # xgb_dev = numpy.concatenate((nb_oof_test, lr_oof_test, svm_oof_dev), axis=1)
+            #
+            # xgboost_model = xgboost.XGBClassifier(random_state=1, learning_rate=0.01)
+            # xgboost_classifier = train_model(xgboost_model, xgb_train, training_labels)
+            # xgboost_predictions = get_predictions(xgboost_classifier, xgb_dev)
+            # print("XGBOOST CLASSIFIER: ", get_model_accuracy(xgboost_predictions, dev_labels))
+            # print_confusion_matrix(xgboost_predictions, dev_labels)
+
+            if os.path.exists(output_dir) is False:
+                print("Creating output directory " + output_dir)
+                os.makedirs(output_dir)
+
+            # with open(data_path + "final_outputs/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
+            #     tsv_writer = csv.writer(out_file, delimiter='\t')
+            #     for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_word_predictions)):
+            #         tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
+
+            with open(output_dir + sLang + ".tsv", 'w', newline='') as out_file:
+                tsv_writer = csv.writer(out_file, delimiter='\t')
+                for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_predictions)):
+                    tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
+
+            with zipfile.ZipFile(output_dir + prefix + '_' + sLang + ".zip", 'w') as file_zip:
+                print("Creating zip file: " + output_dir + prefix + '_' + sLang + ".zip")
+                file_zip.write(output_dir + sLang + ".tsv")
+
+            run_file = output_dir + sLang + ".tsv"
+            gold_file = data_path + sLang + "/intertass_" + sLang + "_dev_gold.tsv"
+
+            scores = evalTask1(gold_file, run_file)
+            with open(output_dir + prefix + '_' + sLang +  ".res", 'w', newline='') as out_file:
+                print("f1_score: %f\n" % scores['maf1'])
+                out_file.write("f1_score: %f\n" % scores['maf1'])
+                print("precision: %f\n" % scores['map'])
+                out_file.write("precision: %f\n" % scores['map'])
+                print("recall: %f\n" % scores['mar'])
+                out_file.write("recall: %f\n" % scores['mar'])
+
+        zipf = zipfile.ZipFile('submission.zip', 'w', zipfile.ZIP_DEFLATED)
+        zipdir('output_dir', zipf)
+        zipf.close()

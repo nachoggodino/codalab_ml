@@ -7,11 +7,9 @@ import pandas
 from sklearn import preprocessing
 import spacy
 from re import finditer
-import matplotlib.pyplot as pyplot
 import hunspell
 
 
-lemmatizer = spacy.load("es_core_news_sm")
 
 
 def lemmatize_list(datalist):
@@ -40,15 +38,6 @@ def regex_sub(string):
     print(re.sub(r"(\w)(\1{2,})", camel_case_split, string))
     return
 
-
-LANGUAGE_CODE = 'es'
-data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
-data_path_mint = "/home/nacho/DATASETS/public_data_development/"
-parser_dev = ET.XMLParser(encoding='utf-8')
-parser_train = ET.XMLParser(encoding='utf-8')
-
-tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
-tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
 
 
 def get_dataframe_from_xml(data):
@@ -90,7 +79,5 @@ def get_dataframe_from_xml(data):
     return result_df
 
 
-dicc = hunspell.Hunspell('es_ANY', hunspell_data_dir="C:/Users/nacho/Downloads/")
-print(dicc.suggest
-      ('holla'))
-print(dicc.suggest("holla")[0])
+sentence = "Buenos días idiota######"
+print(sentence.count('#'))
