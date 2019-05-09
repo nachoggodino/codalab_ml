@@ -22,7 +22,7 @@ from nltk.tokenize.treebank import TreebankWordDetokenizer
 from collections import Counter
 
 LANGUAGE_CODE = 'es'
-dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="C:/Users/nacho/Downloads/")
+dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="./")
 
 emoji_pattern = re.compile("[" u"\U0001F600-\U0001F64F"  # emoticons
          u"\U0001F300-\U0001F5FF"  # symbols & pictographs
@@ -32,7 +32,7 @@ emoji_pattern = re.compile("[" u"\U0001F600-\U0001F64F"  # emoticons
          u"\U000024C2-\U0001F251"
          "]+", flags=re.UNICODE)
 
-data_path = "C:/Users/nacho/OneDrive/Documentos/TELECO/TFG/CODALAB/DATASETS/public_data_development/"
+data_path = "./public_data_development/"
 data_path_mint = "/home/nacho/DATASETS/public_data_development/"
 parser_dev = ET.XMLParser(encoding='utf-8')
 parser_train = ET.XMLParser(encoding='utf-8')
@@ -152,10 +152,10 @@ def libreoffice_processing(tokenized_data):
     for tweet in tokenized_data:
         mini_result = []
         for word in tweet:
-            print("From " + word + " to")
-            print(next(iter(dictionary.suggest(word)), word))
             if not dictionary.spell(word):
                 mini_result.append(next(iter(dictionary.suggest(word)), word))
+                print("From " + word + " to " + next(iter(dictionary.suggest(word)), word))
+
             else:
                 mini_result.append(word)
         result.append(mini_result)
