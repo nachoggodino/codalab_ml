@@ -511,28 +511,30 @@ if __name__ == '__main__':
             # if bTestPhase is True:
             #   without_accents_tst = remove_accents(lemmatized_tst_tweets)
 
-            # final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_train_tweets]
-            # final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_dev_tweets]
-            # if bTestPhase is True:
-            #     final_tst_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_tst_tweets]
-            #
-            # # COUNT VECTORS
-            # if bTestPhase is True and bCross is True:  # Add train + dev to have more data
-            #     x_train_count_vectors, x_tst_count_vectors = perform_count_vectors(final_train_content, final_tst_content)
-            # elif bTestPhase is True:
-            #     x_train_count_vectors, x_tst_count_vectors = perform_count_vectors(final_train_content + final_dev_content,
-            #                                                                                             final_tst_content)
-            # else:
-            #     x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_dev_content)
-            #
+            final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in tokenized_train_content]
+            final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in tokenized_dev_content]
+            if bTestPhase is True:
+                final_tst_content = [TreebankWordDetokenizer().detokenize(row) for row in tokenized_tst_data]
+
+
+
+            # COUNT VECTORS
+            if bTestPhase is True and bCross is True:  # Add train + dev to have more data
+                x_train_count_vectors, x_tst_count_vectors = perform_count_vectors(final_train_content, final_tst_content)
+            elif bTestPhase is True:
+                x_train_count_vectors, x_tst_count_vectors = perform_count_vectors(final_train_content + final_dev_content,
+                                                                                                        final_tst_content)
+            else:
+                x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_dev_content)
+
 
             # TF-IDF VECTORS
-            # if bTestPhase is True and bCross is True:
-            #     xtrain_tfidf, xtst_tfidf = perform_tf_idf_vectors(final_train_content, final_tst_content)
-            # elif bTestPhase is True:
-            #     xtrain_tfidf, xtst_tfidf = perform_tf_idf_vectors(final_train_content + final_dev_content, final_tst_content)
-            # else:
-            #     xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
+            if bTestPhase is True and bCross is True:
+                xtrain_tfidf, xtst_tfidf = perform_tf_idf_vectors(final_train_content, final_tst_content)
+            elif bTestPhase is True:
+                xtrain_tfidf, xtst_tfidf = perform_tf_idf_vectors(final_train_content + final_dev_content, final_tst_content)
+            else:
+                xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
 
             train_features = pd.DataFrame({
                 'tweet_length': train_data['tweet_length'],
@@ -574,40 +576,40 @@ if __name__ == '__main__':
                     'letter_repetition': tst_data['letter_repetition'],
                 })
 
-            # # CONCATENATE VECTORS AND FEATURES
-            #
-            # if bTestPhase is True and bCross is True:  # Use train_dev_cross + dev
-            #     x_train_count_vectors = add_feature(x_train_count_vectors, train_features)
-            #     x_tst_count_vectors = add_feature(x_tst_count_vectors, tst_features)
-            # elif bTestPhase is True:  # Combine train + dev
-            #     x_train_count_vectors = add_feature(x_train_count_vectors + x_dev_count_vectors,
-            #                                         pd.concat([train_features, dev_features]))
-            #     x_tst_count_vectors = add_feature(x_tst_count_vectors, tst_features)
-            # else:
-            #     x_train_count_vectors = add_feature(x_train_count_vectors, train_features)
-            #     x_dev_count_vectors = add_feature(x_dev_count_vectors, dev_features)
-            #
-            # if bTestPhase is True and bCross is True:  # Use train_dev_cross + dev
-            #     xtrain_tfidf = add_feature(xtrain_tfidf, train_features)
-            #     xtst_tfidf = add_feature(xtst_tfidf, tst_features)
-            # elif bTestPhase is True:  # Combine train + dev
-            #     xtrain_tfidf = add_feature(xtrain_tfidf + xdev_tfidf,
-            #                                pd.concat([train_features, dev_features]))
-            #     xtst_tfidf = add_feature(xtst_tfidf, tst_features)
-            # else:
-            #     xtrain_tfidf = add_feature(xtrain_tfidf, train_features)
-            #     xdev_tfidf = add_feature(xdev_tfidf, dev_features)
+            # CONCATENATE VECTORS AND FEATURES
+
+            if bTestPhase is True and bCross is True:  # Use train_dev_cross + dev
+                x_train_count_vectors = add_feature(x_train_count_vectors, train_features)
+                x_tst_count_vectors = add_feature(x_tst_count_vectors, tst_features)
+            elif bTestPhase is True:  # Combine train + dev
+                x_train_count_vectors = add_feature(x_train_count_vectors + x_dev_count_vectors,
+                                                    pd.concat([train_features, dev_features]))
+                x_tst_count_vectors = add_feature(x_tst_count_vectors, tst_features)
+            else:
+                x_train_count_vectors = add_feature(x_train_count_vectors, train_features)
+                x_dev_count_vectors = add_feature(x_dev_count_vectors, dev_features)
+
+            if bTestPhase is True and bCross is True:  # Use train_dev_cross + dev
+                xtrain_tfidf = add_feature(xtrain_tfidf, train_features)
+                xtst_tfidf = add_feature(xtst_tfidf, tst_features)
+            elif bTestPhase is True:  # Combine train + dev
+                xtrain_tfidf = add_feature(xtrain_tfidf + xdev_tfidf,
+                                           pd.concat([train_features, dev_features]))
+                xtst_tfidf = add_feature(xtst_tfidf, tst_features)
+            else:
+                xtrain_tfidf = add_feature(xtrain_tfidf, train_features)
+                xdev_tfidf = add_feature(xdev_tfidf, dev_features)
 
             # TRAINING
 
-            training_set = train_features
+            training_set = x_train_count_vectors
             training_labels = train_data['sentiment']
             bTern = False  # Set to True for training with NEU and NONE as one category
             if bTestPhase is True:
-                tst_set = tst_features
+                tst_set = x_tst_count_vectors
                 tst_labels = None  # We don't have the test labels right now
             else:
-                dev_set = dev_features
+                dev_set = x_dev_count_vectors
                 dev_labels = dev_data['sentiment']
 
             # WORD EMBEDDINGS
@@ -660,7 +662,6 @@ if __name__ == '__main__':
                 # print("NN, Word Embeddings DEV: ", get_model_accuracy(nn_predictions, dev_labels))
                 # print_confusion_matrix(nn_predictions, dev_labels)
 
-
             # CLASSIFIERS
             lr = linear_model.LogisticRegression()
             nb = naive_bayes.MultinomialNB()
@@ -675,7 +676,7 @@ if __name__ == '__main__':
                 lr_classifier, lr_predictions, lr_probabilities = train_model(lr, training_set, training_labels, tst_set, tst_labels, 'LR', bTern)
                 nb_classifier, nb_predictions, nb_probabilities = train_model(nb, training_set, training_labels, tst_set, tst_labels, 'NB', bTern)
                 dt_classifier, dt_predictions, dt_probabilities = train_model(dt, training_set, training_labels, tst_set, tst_labels, 'DT', bTern)
-                svm_classifier, svm_predictions, svm_probabilities = train_model(svm, training_set, training_labels, tst_set, tst_labels, 'SVM', bTern)
+                #svm_classifier, svm_predictions, svm_probabilities = train_model(svm, training_set, training_labels, tst_set, tst_labels, 'SVM', bTern)
                 rf_classifier, rf_predictions, rf_probabilities = train_model(rf, training_set, training_labels, tst_set, tst_labels, 'RF', bTern)
                 et_classifier, et_predictions, et_probabilities = train_model(et, training_set, training_labels, tst_set, tst_labels, 'ET', bTern)
                 ada_classifier, ada_predictions, ada_probabilities = train_model(ada, training_set, training_labels, tst_set, tst_labels, 'ADA', bTern)
@@ -684,7 +685,7 @@ if __name__ == '__main__':
                 lr_classifier, lr_predictions, lr_probabilities = train_model(lr, training_set, training_labels, dev_set, dev_labels, 'LR', bTern)
                 nb_classifier, nb_predictions, nb_probabilities = train_model(nb, training_set, training_labels, dev_set, dev_labels, 'NB', bTern)
                 dt_classifier, dt_predictions, dt_probabilities = train_model(dt, training_set, training_labels, dev_set, dev_labels, 'DT', bTern)
-                svm_classifier, svm_predictions, svm_probabilities = train_model(svm, training_set, training_labels, dev_set, dev_labels, 'SVM', bTern)
+                #svm_classifier, svm_predictions, svm_probabilities = train_model(svm, training_set, training_labels, dev_set, dev_labels, 'SVM', bTern)
                 rf_classifier, rf_predictions, rf_probabilities = train_model(rf, training_set, training_labels, dev_set, dev_labels, 'RF', bTern)
                 et_classifier, et_predictions, et_probabilities = train_model(et, training_set, training_labels, dev_set, dev_labels, 'ET', bTern)
                 ada_classifier, ada_predictions, ada_probabilities = train_model(ada, training_set, training_labels, dev_set, dev_labels, 'ADA', bTern)
@@ -692,9 +693,9 @@ if __name__ == '__main__':
 
             probabilities_for_voting_ensemble = [
                 lr_probabilities,
-                nb_probabilities,
+                # nb_probabilities,
                 dt_probabilities,
-                svm_probabilities,
+                #svm_probabilities,
                 rf_probabilities,
                 et_probabilities,
                 ada_probabilities,
@@ -709,28 +710,17 @@ if __name__ == '__main__':
                 fasttext_df = pd.read_csv('./cr_dev_fasttext_full.csv')
                 fasttext_df = fasttext_df.drop(columns='ID')
                 print("FASTTEXT MODEL")
-                fasttext_predictions = fasttext_df.to_numpy().argmax(1)
+                fasttext_probabilities = fasttext_df.to_numpy()
+                fasttext_predictions = fasttext_probabilities.argmax(1)
                 print_confusion_matrix(fasttext_predictions, dev_labels)
                 print("ENSEMBLE MODEL")
 
                 probabilities_for_voting_ensemble = [
-                    fasttext_df.to_numpy(),
+                    fasttext_probabilities,
                     ada_probabilities
                 ]
                 averaging_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
                 print_confusion_matrix(averaging_predictions, dev_labels)
-
-
-            # # ENSEMBLINGS
-            # voting_model = VotingClassifier(estimators=[
-            #     ('lr', linear_model.LogisticRegression()),
-            #     ('svm', svm.LinearSVC()),
-            #     ('nb', naive_bayes.MultinomialNB())], voting='hard')
-            #
-            # voting_classifier = train_model(voting_model, x_train_count_vectors, training_labels)
-            # voting_predictions = get_predictions(voting_classifier, x_dev_count_vectors)
-            # print("VOTING CLASSIFIER: ", get_model_accuracy(voting_predictions, dev_labels))
-            # print_confusion_matrix(voting_predictions, dev_labels)
 
             # rf_oof_train, rf_oof_test = get_oof(rf, training_set, training_labels, dev_set)
             # print("1")
