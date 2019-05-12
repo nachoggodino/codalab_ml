@@ -65,6 +65,7 @@ print("Loading Hunspell directory")
 
 LABEL_ENCODER = preprocessing.LabelEncoder()
 TERNARY_LABEL_ENCODER = preprocessing.LabelEncoder()
+data_test_path = "./public_data_task1/"
 data_path = "./public_data_development/"
 # data_path = "../TASS2019/DATASETS/public_data/"
 
@@ -406,13 +407,43 @@ def read_files(sLang, bCross):
         train_data = get_dataframe_from_xml(tree_train)
 
     if bTestPhase is True:
-        tree_tst = ET.parse(data_path + sLang + "/intertass_" + sLang + "_test.xml")
+        tree_tst = ET.parse(data_test_path + "/intertass_" + sLang + "_test.xml")
         tst_data = get_dataframe_from_xml(tree_tst)
-    else:  # When working with cross or mono, we can only use dev_lang
-        tree_dev = ET.parse(data_path + sLang + "/intertass_" + sLang + "_dev.xml")
-        dev_data = get_dataframe_from_xml(tree_dev)
+
+    # When working with cross or mono, we can only use dev_lang
+    tree_dev = ET.parse(data_path + sLang + "/intertass_" + sLang + "_dev.xml")
+    dev_data = get_dataframe_from_xml(tree_dev)
 
     return train_data, dev_data, tst_data
+
+
+def fasttext_to_df(fasttext_format_path):
+    with open(fasttext_format_path, 'r') as ft_file:
+        negs, poss, neus, nones = [], [], [], []
+        for i, line in enumerate(ft_file):
+            words = line.split()
+            print(str(len(words)))
+            for j, word in enumerate(words):
+                if j % 2 is 1:
+                    continue
+                else:
+                    label = word.replace('__label__', '')
+                    if label == 'N':
+                        negs.append(float(words[j + 1]))
+                    if label == 'P':
+                        poss.append(float(words[j + 1]))
+                    if label == 'NEU':
+                        neus.append(float(words[j + 1]))
+                    if label == 'NONE':
+                        nones.append(float(words[j + 1]))
+
+        final_df = pd.DataFrame({
+            'N': negs,
+            'NEU': neus,
+            'NONE': nones,
+            'P': poss,
+        })
+        return final_df
 
 
 if __name__ == '__main__':
@@ -420,6 +451,8 @@ if __name__ == '__main__':
     # GET THE DATA
     output_dir = data_path + "final_outputs/"
     for bCross in CROSS_LINGUAL:
+        if bCross:
+            continue
         print('----------------- CROSS : ' + str(bCross) + ' ----------------')
 
         bTern = False  # Set to True for training with NEU and NONE as one category
@@ -707,28 +740,34 @@ if __name__ == '__main__':
                 all_vso_predictions.append(vso_preds)
                 print()
 
-            print("VOTING ENSEMBLE")
-            print_confusion_matrix(get_averaged_predictions(all_probabilities), dev_labels)
-            print()
+            if not bTestPhase:
+                print("VOTING ENSEMBLE")
+                print_confusion_matrix(get_averaged_predictions(all_probabilities), dev_labels)
+                print()
 
-            # FASTTEXT
             str_mode = 'cross_' if bCross else 'mono_'
             str_tst_phase = 'test' if bTestPhase else 'dev'
             str_full_reduced = 'reduced' if bTern else 'full'
 
-            if bCross:
-                fasttext_file = sLang + '_' + str_tst_phase + '_fasttext_cross_' + str_full_reduced + '.csv'
-                fasttext_path = './fasttext/cross_fasttext_outputs_dev-test_full-reduced/'
+            # FASTTEXT
+            if False:  # sLang == 'cr' and not bCross:
+                fasttext_df = fasttext_to_df('./cr_dev_mono.out')
             else:
-                fasttext_file = sLang + '_' + str_tst_phase + '_fasttext_' + str_full_reduced + '.csv'
-                fasttext_path = './fasttext/mono_fasttext_outputs_dev-test_full-reduced/'
+                if bCross:
+                    fasttext_file = sLang + '_' + str_tst_phase + '_fasttext_cross_' + str_full_reduced + '.csv'
+                    fasttext_path = './fasttext/cross_fasttext_outputs_dev-test_full-reduced/'
+                else:
+                    fasttext_file = sLang + '_' + str_tst_phase + '_fasttext_' + str_full_reduced + '.csv'
+                    fasttext_path = './fasttext/mono_fasttext_outputs_dev-test_full-reduced/'
 
-            fasttext_df = pd.read_csv(fasttext_path + fasttext_file)
-            fasttext_df = fasttext_df.drop(columns='ID')
+                fasttext_df = pd.read_csv(fasttext_path + fasttext_file)
+                fasttext_df = fasttext_df.drop(columns='ID')
+
             print("FASTTEXT MODEL")
             fasttext_probabilities = fasttext_df.to_numpy()
             fasttext_predictions = fasttext_probabilities.argmax(1)
-            print_confusion_matrix(fasttext_predictions, dev_labels)
+            if not bTestPhase:
+                print_confusion_matrix(fasttext_predictions, dev_labels)
             print()
 
             # BERT
@@ -746,7 +785,8 @@ if __name__ == '__main__':
                 print("BERT MODEL")
                 bert_probabilities = bert_df.to_numpy()
                 bert_predictions = bert_probabilities.argmax(1)
-                print_confusion_matrix(bert_predictions, dev_labels)
+                if not bTestPhase:
+                    print_confusion_matrix(bert_predictions, dev_labels)
                 print()
 
             print('-------------- FINAL ENSEMBLE --------------')
@@ -767,21 +807,29 @@ if __name__ == '__main__':
                 if bCross:
                     if sLang is 'es' and i is 0:  # lr, nb, dt, svm, rf, et, ada, gb
                         submitting_predictions = final_predictions
+                        print(sLang + ' saved!')
                     elif sLang is 'cr' and i is 0:
                         submitting_predictions = final_predictions
+                        print(sLang + ' saved!')
                     elif sLang is 'mx' and i is 6:
                         submitting_predictions = final_predictions
+                        print(sLang + ' saved!')
                     elif sLang is 'uy' and i is 1:
                         submitting_predictions = final_predictions
+                        print(sLang + ' saved!')
                 else:
                     if sLang is 'es' and i is 4:  # lr, nb, dt, svm, rf, et, ada, gb
                         submitting_predictions = final_predictions
+                        print(sLang + ' saved!')
                     elif sLang is 'cr' and i is 6:
                         submitting_predictions = final_predictions
+                        print(sLang + ' saved!')
                     elif sLang is 'uy' and i is 2:
                         submitting_predictions = final_predictions
+                        print(sLang + ' saved!')
 
-                print_confusion_matrix(final_predictions, dev_labels)
+                if not bTestPhase:
+                    print_confusion_matrix(final_predictions, dev_labels)
                 print()
 
             print('From OneVsRest Models:')
@@ -797,13 +845,17 @@ if __name__ == '__main__':
                 final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
                 if bCross and sLang is 'pe' and i is 7:
                     submitting_predictions = final_predictions
+                    print(sLang + ' saved!')
                 elif not bCross:
                     if sLang is 'mx' and i is 6:  # lr, nb, dt, svm, rf, et, ada, gb
                         submitting_predictions = final_predictions
+                        print(sLang + ' saved!')
                     elif sLang is 'pe' and i is 7:
                         submitting_predictions = final_predictions
+                        print(sLang + ' saved!')
 
-                print_confusion_matrix(final_predictions, dev_labels)
+                if not bTestPhase:
+                    print_confusion_matrix(final_predictions, dev_labels)
                 print()
 
             print()
@@ -845,26 +897,30 @@ if __name__ == '__main__':
             #     for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_word_predictions)):
             #         tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
 
+
             with open(output_dir + sLang + ".tsv", 'w', newline='') as out_file:
                 tsv_writer = csv.writer(out_file, delimiter='\t')
-                for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(final_predictions)):
-                    tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
+                for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(submitting_predictions)):
+                    if bTestPhase:
+                        tsv_writer.writerow([tst_data['tweet_id'][i], prediction])
+                    else:
+                        tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
 
-            with zipfile.ZipFile(output_dir + prefix + '_' + sLang + ".zip", 'w') as file_zip:
-                print("Creating zip file: " + output_dir + prefix + '_' + sLang + ".zip")
-                file_zip.write(output_dir + sLang + ".tsv")
-
-            run_file = output_dir + sLang + ".tsv"
-            gold_file = data_path + sLang + "/intertass_" + sLang + "_dev_gold.tsv"
-
-            scores = evalTask1(gold_file, run_file)
-            with open(output_dir + prefix + '_' + sLang +  ".res", 'w', newline='') as out_file:
-                print("f1_score: %f\n" % scores['maf1'])
-                out_file.write("f1_score: %f\n" % scores['maf1'])
-                print("precision: %f\n" % scores['map'])
-                out_file.write("precision: %f\n" % scores['map'])
-                print("recall: %f\n" % scores['mar'])
-                out_file.write("recall: %f\n" % scores['mar'])
+            # with zipfile.ZipFile(output_dir + prefix + '_' + sLang + ".zip", 'w') as file_zip:
+            #     print("Creating zip file: " + output_dir + prefix + '_' + sLang + ".zip")
+            #     file_zip.write(output_dir + sLang + ".tsv")
+            #
+            # run_file = output_dir + sLang + ".tsv"
+            # gold_file = data_path + sLang + "/intertass_" + sLang + "_dev_gold.tsv"
+            #
+            # scores = evalTask1(gold_file, run_file)
+            # with open(output_dir + prefix + '_' + sLang + ".res", 'w', newline='') as out_file:
+            #     print("f1_score: %f\n" % scores['maf1'])
+            #     out_file.write("f1_score: %f\n" % scores['maf1'])
+            #     print("precision: %f\n" % scores['map'])
+            #     out_file.write("precision: %f\n" % scores['map'])
+            #     print("recall: %f\n" % scores['mar'])
+            #     out_file.write("recall: %f\n" % scores['mar'])
 
         zipf = zipfile.ZipFile('submission.zip', 'w', zipfile.ZIP_DEFLATED)
         zipdir('output_dir', zipf)
