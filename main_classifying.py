@@ -293,7 +293,7 @@ def train_model(classifier, x_train, y_train, x_test, y_test, clf_name, ternary_
 
 def get_predictions(trained_classifier, feature_test_vector, is_vso=False):
     if is_vso:
-        return trained_classifier.predict(feature_test_vector), None
+        return trained_classifier.predict(feature_test_vector), trained_classifier.decision_function(feature_test_vector)
     else:
         return trained_classifier.predict(feature_test_vector), trained_classifier.predict_proba(feature_test_vector)
 
@@ -422,7 +422,6 @@ def fasttext_to_df(fasttext_format_path):
         negs, poss, neus, nones = [], [], [], []
         for i, line in enumerate(ft_file):
             words = line.split()
-            print(str(len(words)))
             for j, word in enumerate(words):
                 if j % 2 is 1:
                     continue
@@ -451,8 +450,7 @@ if __name__ == '__main__':
     # GET THE DATA
     output_dir = data_path + "final_outputs/"
     for bCross in CROSS_LINGUAL:
-        if bCross:
-            continue
+
         print('----------------- CROSS : ' + str(bCross) + ' ----------------')
 
         bTern = False  # Set to True for training with NEU and NONE as one category
@@ -464,6 +462,10 @@ if __name__ == '__main__':
             output_dir = output_dir + '/mono/'
 
         for sLang in LANGUAGE_CODE:
+
+            if sLang == 'es' or sLang == 'mx':
+                continue
+
             print('** LANG: ' + sLang)
 
             train_data, dev_data, tst_data = read_files(sLang, bCross)
@@ -537,7 +539,7 @@ if __name__ == '__main__':
             # lemmatized_dev_tweets = lemmatize_list(preprocessed_dev_content)
             # if bTestPhase is True:
             #     lemmatized_tst_tweets = lemmatize_list(preprocessed_tst_content)
-            #
+
             # # REMOVING ACCENTS
             # without_accents_train = remove_accents(lemmatized_train_tweets)
             # without_accents_dev = remove_accents(lemmatized_dev_tweets)
@@ -551,7 +553,7 @@ if __name__ == '__main__':
 
 
 
-            # # COUNT VECTORS
+            # COUNT VECTORS
             # if bTestPhase is True and bCross is True:  # Add train + dev to have more data
             #     x_train_count_vectors, x_tst_count_vectors = perform_count_vectors(final_train_content, final_tst_content)
             # elif bTestPhase is True:
@@ -579,7 +581,7 @@ if __name__ == '__main__':
                 'neg_voc': train_data['neg_voc'],
                 'neu_voc': train_data['neu_voc'],
                 'none_voc': train_data['none_voc'],
-                'letter_repetition': train_data['letter_repetition'],
+                'letter_repetition': train_data['letter_repetition']
             })
 
             dev_features = pd.DataFrame({
@@ -592,7 +594,7 @@ if __name__ == '__main__':
                 'neg_voc': dev_data['neg_voc'],
                 'neu_voc': dev_data['neu_voc'],
                 'none_voc': dev_data['none_voc'],
-                'letter_repetition': dev_data['letter_repetition'],
+                'letter_repetition': dev_data['letter_repetition']
             })
 
             if bTestPhase is True:
@@ -606,7 +608,7 @@ if __name__ == '__main__':
                     'neg_voc': tst_data['neg_voc'],
                     'neu_voc': tst_data['neu_voc'],
                     'none_voc': tst_data['none_voc'],
-                    'letter_repetition': tst_data['letter_repetition'],
+                    'letter_repetition': tst_data['letter_repetition']
                 })
 
             # CONCATENATE VECTORS AND FEATURES
@@ -621,7 +623,7 @@ if __name__ == '__main__':
             # else:
             #     x_train_count_vectors = add_feature(x_train_count_vectors, train_features)
             #     x_dev_count_vectors = add_feature(x_dev_count_vectors, dev_features)
-            #
+
             # if bTestPhase is True and bCross is True:  # Use train_dev_cross + dev
             #     xtrain_tfidf = add_feature(xtrain_tfidf, train_features)
             #     xtst_tfidf = add_feature(xtst_tfidf, tst_features)
@@ -705,13 +707,14 @@ if __name__ == '__main__':
             gb = GradientBoostingClassifier()
             sgdb = SGDClassifier()
 
-            all_classifiers = [lr, nb, dt, svm, rf, et, ada, gb]
-            all_classif_names = ['LR', 'NB', 'DT', 'SVM', 'RF', 'ET', 'ADA', 'GB', 'SGDB']
+            all_classifiers = [lr, nb, dt, rf, et, ada, gb]
+            all_classif_names = ['LR', 'NB', 'DT', 'RF', 'ET', 'ADA', 'GB', 'SGDB']
             all_predictions = []
             all_probabilities = []
             all_vsr_predictions = []
             all_vsr_probabilities = []
             all_vso_predictions = []
+            all_vso_probabilities = []
 
             for i, clf in enumerate(all_classifiers):
                 print("TRAINING " + all_classif_names[i])
@@ -738,6 +741,7 @@ if __name__ == '__main__':
                 all_vsr_predictions.append(vsr_preds)
                 all_vsr_probabilities.append(vsr_probs)
                 all_vso_predictions.append(vso_preds)
+                all_vso_probabilities.append(vso_probs)
                 print()
 
             if not bTestPhase:
@@ -750,8 +754,20 @@ if __name__ == '__main__':
             str_full_reduced = 'reduced' if bTern else 'full'
 
             # FASTTEXT
-            if False:  # sLang == 'cr' and not bCross:
-                fasttext_df = fasttext_to_df('./cr_dev_mono.out')
+
+            if ((sLang == 'es') or (sLang == 'cr')) or (not bCross and sLang == 'pe') or (not bCross and sLang == 'uy'):
+                print('Yeah')
+                if bTestPhase:
+                    if bCross and sLang == ('es' or 'cr'):
+                        fasttext_df = fasttext_to_df('./new_fasttext/cross/test/' + sLang + '_test_cross.out')
+                    else:
+                        fasttext_df = fasttext_to_df('./new_fasttext/mono/test/' + sLang + '_test_mono.out')
+                else:
+                    if bCross:
+                        fasttext_df = fasttext_to_df('./new_fasttext/cross/dev/' + sLang + '_dev_cross.out')
+                    else:
+                        fasttext_df = fasttext_to_df('./new_fasttext/mono/dev/' + sLang + '_dev_mono.out')
+
             else:
                 if bCross:
                     fasttext_file = sLang + '_' + str_tst_phase + '_fasttext_cross_' + str_full_reduced + '.csv'
@@ -762,6 +778,7 @@ if __name__ == '__main__':
 
                 fasttext_df = pd.read_csv(fasttext_path + fasttext_file)
                 fasttext_df = fasttext_df.drop(columns='ID')
+
 
             print("FASTTEXT MODEL")
             fasttext_probabilities = fasttext_df.to_numpy()
@@ -805,28 +822,23 @@ if __name__ == '__main__':
                 ]
                 final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
                 if bCross:
-                    if sLang is 'es' and i is 0:  # lr, nb, dt, svm, rf, et, ada, gb
-                        submitting_predictions = final_predictions
-                        print(sLang + ' saved!')
-                    elif sLang is 'cr' and i is 0:
-                        submitting_predictions = final_predictions
-                        print(sLang + ' saved!')
-                    elif sLang is 'mx' and i is 6:
+                    if sLang is 'mx' and i is 5:
                         submitting_predictions = final_predictions
                         print(sLang + ' saved!')
                     elif sLang is 'uy' and i is 1:
                         submitting_predictions = final_predictions
                         print(sLang + ' saved!')
                 else:
-                    if sLang is 'es' and i is 4:  # lr, nb, dt, svm, rf, et, ada, gb
+                    if sLang is 'es' and i is 1:  # lr, nb, dt, svm, rf, et, ada, gb
                         submitting_predictions = final_predictions
                         print(sLang + ' saved!')
-                    elif sLang is 'cr' and i is 6:
+                    elif sLang is 'cr' and i is 5:
                         submitting_predictions = final_predictions
                         print(sLang + ' saved!')
-                    elif sLang is 'uy' and i is 2:
+                    elif sLang is 'pe' and i is 5:
                         submitting_predictions = final_predictions
                         print(sLang + ' saved!')
+
 
                 if not bTestPhase:
                     print_confusion_matrix(final_predictions, dev_labels)
@@ -843,17 +855,37 @@ if __name__ == '__main__':
                     prob_matrix
                 ]
                 final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
-                if bCross and sLang is 'pe' and i is 7:
+                if bCross and sLang is 'pe' and i is 6:
+                    submitting_predictions = final_predictions
+                    print(sLang + ' saved!')
+                elif bCross and sLang is 'cr' and i is 0:
                     submitting_predictions = final_predictions
                     print(sLang + ' saved!')
                 elif not bCross:
-                    if sLang is 'mx' and i is 6:  # lr, nb, dt, svm, rf, et, ada, gb
+                    if sLang is 'mx' and i is 5:  # lr, nb, dt, svm, rf, et, ada, gb
                         submitting_predictions = final_predictions
                         print(sLang + ' saved!')
-                    elif sLang is 'pe' and i is 7:
+                    elif sLang is 'uy' and i is 5:
                         submitting_predictions = final_predictions
                         print(sLang + ' saved!')
 
+                if not bTestPhase:
+                    print_confusion_matrix(final_predictions, dev_labels)
+                print()
+
+            print('From OneVsOne Models:')
+            print()
+            for i, prob_matrix in enumerate(all_vso_probabilities):
+                print('With ' + all_classif_names[i])
+                probabilities_for_voting_ensemble = [
+                    bert_probabilities,
+                    fasttext_probabilities,
+                    prob_matrix
+                ]
+                final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
+                if bCross and sLang is 'es' and i is 0:  # lr, nb, dt, svm, rf, et, ada, gb
+                    submitting_predictions = final_predictions
+                    print(sLang + ' saved!')
                 if not bTestPhase:
                     print_confusion_matrix(final_predictions, dev_labels)
                 print()
