@@ -19,10 +19,12 @@ from keras import layers, models, optimizers
 
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 
+from imblearn.over_sampling import RandomOverSampler
+
 from collections import Counter
 
 LANGUAGE_CODE = 'es'
-dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="./")
+dictionary = hunspell.HunSpell('./dictionaries/es_ANY.dic', "./dictionaries/es_ANY.aff")
 
 emoji_pattern = re.compile("[" u"\U0001F600-\U0001F64F"  # emoticons
          u"\U0001F300-\U0001F5FF"  # symbols & pictographs
@@ -32,8 +34,8 @@ emoji_pattern = re.compile("[" u"\U0001F600-\U0001F64F"  # emoticons
          u"\U000024C2-\U0001F251"
          "]+", flags=re.UNICODE)
 
-data_path = "./public_data_development/"
-data_path_mint = "/home/nacho/DATASETS/public_data_development/"
+data_path = "./codalab/DATASETS/public_data_development/"
+test_path = "./codalab/DATASETS/public_data_task1/"
 parser_dev = ET.XMLParser(encoding='utf-8')
 parser_train = ET.XMLParser(encoding='utf-8')
 
@@ -76,6 +78,15 @@ def get_dataframe_from_xml(data):
     result_df['sentiment'] = sentiment  # encoder.fit_transform(sentiment)
 
     return result_df
+
+
+def perform_upsampling(dataframe):
+    ros = RandomOverSampler()
+    x_resampled, y_resampled = ros.fit_resample(dataframe[['tweet_id', 'content']], dataframe['sentiment'])
+    df = pandas.DataFrame(data=x_resampled[0:, 0:], columns=['tweet_id', 'content'])
+    df['sentiment'] = y_resampled
+    df = df.sample(frac=1).reset_index(drop=True)
+    return df
 
 
 def extract_uppercase_feature(dataframe):
@@ -148,18 +159,9 @@ def camel_case_split(identifier):
 
 
 def libreoffice_processing(tokenized_data):
-    result = []
-    for tweet in tokenized_data:
-        mini_result = []
-        for word in tweet:
-            if not dictionary.spell(word):
-                mini_result.append(next(iter(dictionary.suggest(word)), word))
-                print("From " + word + " to " + next(iter(dictionary.suggest(word)), word))
+    print("Libreoffice processing")
+    return [[word if dictionary.spell(word) is True else next(iter(dictionary.suggest(word)), word) for word in tweet] for tweet in tokenized_data]
 
-            else:
-                mini_result.append(word)
-        result.append(mini_result)
-    return result
 
 
 def get_sentiment_vocabulary(data, positive, negative):
@@ -286,6 +288,9 @@ def print_separator(string_for_printing):
 train_data = get_dataframe_from_xml(tree_train)
 dev_data = get_dataframe_from_xml(tree_dev)
 
+train_data = perform_upsampling(train_data)
+print(train_data)
+
 # TEXT PREPROCESSING
 processed_train_tweets = text_preprocessing(train_data['content'])
 processed_dev_tweets = text_preprocessing(dev_data['content'])
@@ -330,25 +335,25 @@ print_separator("Vocabulary Analysis after tokenize")
 
 print_vocabulary_analysis(tokenized_train_tweets, tokenized_dev_tweets)
 
-print_separator("Vocabulary Analysis after Libreoffice Processing")
-
-libreoffice_train_tweets = libreoffice_processing(tokenized_train_tweets)
-libreoffice_dev_tweets = libreoffice_processing(tokenized_dev_tweets)
-print_vocabulary_analysis(libreoffice_train_tweets, libreoffice_dev_tweets)
-
-print_separator("After lemmatizing the data...")
-
-lemmatized_train_tweets = lemmatize_list(processed_train_tweets)
-lemmatized_dev_tweets = lemmatize_list(processed_dev_tweets)
-
-print_vocabulary_analysis(lemmatized_train_tweets, lemmatized_dev_tweets)
-
-print_separator("After removing accents to the data...")
-
-without_accents_train = remove_accents(lemmatized_train_tweets)
-without_accents_dev = remove_accents(lemmatized_dev_tweets)
-
-print_vocabulary_analysis(without_accents_train, without_accents_dev)
+# print_separator("Vocabulary Analysis after Libreoffice Processing")
+#
+# libreoffice_train_tweets = libreoffice_processing(tokenized_train_tweets)
+# libreoffice_dev_tweets = libreoffice_processing(tokenized_dev_tweets)
+# print_vocabulary_analysis(libreoffice_train_tweets, libreoffice_dev_tweets)
+#
+# print_separator("After lemmatizing the data...")
+#
+# lemmatized_train_tweets = lemmatize_list(processed_train_tweets)
+# lemmatized_dev_tweets = lemmatize_list(processed_dev_tweets)
+#
+# print_vocabulary_analysis(lemmatized_train_tweets, lemmatized_dev_tweets)
+#
+# print_separator("After removing accents to the data...")
+#
+# without_accents_train = remove_accents(lemmatized_train_tweets)
+# without_accents_dev = remove_accents(lemmatized_dev_tweets)
+#
+# print_vocabulary_analysis(without_accents_train, without_accents_dev)
 
 print_separator("Label Counts:")
 
@@ -384,78 +389,78 @@ print()
 print_separator("Correlation analysis in TRAINING_DATA:")
 
 
-with pandas.option_context('display.max_rows', None, 'display.max_columns', None):
-    '''
-    print("Hour VS Sentiment")
-    print()
-    print(train_data.groupby(['hour', 'sentiment']).size())
-    print("Month VS Sentiment")
-    print()
-    print(train_data.groupby(['month', 'sentiment']).size())
-    print("Day of the Week VS Sentiment")
-    print()
-    print(train_data.groupby(['day_of_week', 'sentiment']).size())
-    print("Length VS Sentiment")
-    print()
-    print(train_data.groupby(['length', 'sentiment']).size())
-    '''
-    print("Uppercase VS Sentiment")
-    print()
-    print(train_data.groupby(['has_uppercase', 'sentiment']).size())
-    print("Question VS Sentiment")
-    print()
-    print(train_data.groupby(['question_mark', 'sentiment']).size())
-    print("Exclamation VS Sentiment")
-    print()
-    print(train_data.groupby(['exclamation_mark', 'sentiment']).size())
-    print("Positive Vocabulary VS Sentiment")
-    print()
-    print(train_data.groupby(['pos_voc', 'sentiment']).size())
-    print("Negative Vocabulary VS Sentiment")
-    print()
-    print(train_data.groupby(['neg_voc', 'sentiment']).size())
-    print("Neutral Vocabulary VS Sentiment")
-    print()
-    print(train_data.groupby(['neu_voc', 'sentiment']).size())
-    print("None Vocabulary VS Sentiment")
-    print()
-    print(train_data.groupby(['none_voc', 'sentiment']).size())
-
-    print("Correlation analysis in DEVELOPMENT_DATA:")
-    print()
-    '''
-    print("Hour VS Sentiment")
-    print()
-    print(dev_data.groupby(['hour', 'sentiment']).size())
-    print("Month VS Sentiment")
-    print()
-    print(dev_data.groupby(['month', 'sentiment']).size())
-    print("Day of the Week VS Sentiment")
-    print()
-    print(dev_data.groupby(['day_of_week', 'sentiment']).size())
-    print("Length VS Sentiment")
-    print()
-    print(dev_data.groupby(['length', 'sentiment']).size())
-    '''
-    print("Uppercase VS Sentiment")
-    print()
-    print(dev_data.groupby(['has_uppercase', 'sentiment']).size())
-    print("Question VS Sentiment")
-    print()
-    print(dev_data.groupby(['question_mark', 'sentiment']).size())
-    print("Exclamation VS Sentiment")
-    print()
-    print(dev_data.groupby(['exclamation_mark', 'sentiment']).size())
-    print("Positive Vocabulary VS Sentiment")
-    print()
-    print(dev_data.groupby(['pos_voc', 'sentiment']).size())
-    print("Negative Vocabulary VS Sentiment")
-    print()
-    print(dev_data.groupby(['neg_voc', 'sentiment']).size())
-    print("Neutral Vocabulary VS Sentiment")
-    print()
-    print(dev_data.groupby(['neu_voc', 'sentiment']).size())
-    print("None Vocabulary VS Sentiment")
-    print()
-    print(dev_data.groupby(['none_voc', 'sentiment']).size())
+# with pandas.option_context('display.max_rows', None, 'display.max_columns', None):
+#     '''
+#     print("Hour VS Sentiment")
+#     print()
+#     print(train_data.groupby(['hour', 'sentiment']).size())
+#     print("Month VS Sentiment")
+#     print()
+#     print(train_data.groupby(['month', 'sentiment']).size())
+#     print("Day of the Week VS Sentiment")
+#     print()
+#     print(train_data.groupby(['day_of_week', 'sentiment']).size())
+#     print("Length VS Sentiment")
+#     print()
+#     print(train_data.groupby(['length', 'sentiment']).size())
+#     '''
+#     print("Uppercase VS Sentiment")
+#     print()
+#     print(train_data.groupby(['has_uppercase', 'sentiment']).size())
+#     print("Question VS Sentiment")
+#     print()
+#     print(train_data.groupby(['question_mark', 'sentiment']).size())
+#     print("Exclamation VS Sentiment")
+#     print()
+#     print(train_data.groupby(['exclamation_mark', 'sentiment']).size())
+#     print("Positive Vocabulary VS Sentiment")
+#     print()
+#     print(train_data.groupby(['pos_voc', 'sentiment']).size())
+#     print("Negative Vocabulary VS Sentiment")
+#     print()
+#     print(train_data.groupby(['neg_voc', 'sentiment']).size())
+#     print("Neutral Vocabulary VS Sentiment")
+#     print()
+#     print(train_data.groupby(['neu_voc', 'sentiment']).size())
+#     print("None Vocabulary VS Sentiment")
+#     print()
+#     print(train_data.groupby(['none_voc', 'sentiment']).size())
+#
+#     print("Correlation analysis in DEVELOPMENT_DATA:")
+#     print()
+#     '''
+#     print("Hour VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['hour', 'sentiment']).size())
+#     print("Month VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['month', 'sentiment']).size())
+#     print("Day of the Week VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['day_of_week', 'sentiment']).size())
+#     print("Length VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['length', 'sentiment']).size())
+#     '''
+#     print("Uppercase VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['has_uppercase', 'sentiment']).size())
+#     print("Question VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['question_mark', 'sentiment']).size())
+#     print("Exclamation VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['exclamation_mark', 'sentiment']).size())
+#     print("Positive Vocabulary VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['pos_voc', 'sentiment']).size())
+#     print("Negative Vocabulary VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['neg_voc', 'sentiment']).size())
+#     print("Neutral Vocabulary VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['neu_voc', 'sentiment']).size())
+#     print("None Vocabulary VS Sentiment")
+#     print()
+#     print(dev_data.groupby(['none_voc', 'sentiment']).size())
 
