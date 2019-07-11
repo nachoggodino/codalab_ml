@@ -6,6 +6,7 @@ import nltk
 import unidecode
 import spacy
 import hunspell
+import utils
 
 from scipy.sparse import coo_matrix, hstack
 import sys
@@ -53,85 +54,29 @@ from collections import Counter
 
 from textacy import keyterms
 
-warnings.filterwarnings(action='ignore', category=UserWarning, module='gensim')
-warnings.filterwarnings(action='ignore')
-
 LANGUAGE_CODE = ['es', 'cr', 'mx', 'pe', 'uy']
 CROSS_LINGUAL = [True, False]
-# CROSS_LINGUAL = [True]
 
 # PARAMETERS
-bTestPhase = False  # If we are doing test, then concatenate train + dev, if not use dev as test
-bEvalPhase = True
-bUpsampling = True
+bTestPhase = False  # If true, a second result is given for validation.
+bEvalPhase = False  # If true, the test set is used.
+bUpsampling = False  # If true, upsampling is performed.
+bLexicons = False  # If true, the sentiment vocabulary uses external lexicons.
+bLemmatize = False # If true, the data is lemmatized.
 
-# dictionary = hunspell.Hunspell('es_ANY', hunspell_data_dir="./dictionaries")  # In case you're using CyHunspell
 print("Loading Hunspell directory")
 dictionary = hunspell.HunSpell('./dictionaries/es_ANY.dic', "./dictionaries/es_ANY.aff")  # In case you're using Hunspell
-
-LABEL_ENCODER = preprocessing.LabelEncoder()
-TERNARY_LABEL_ENCODER = preprocessing.LabelEncoder()
-data_test_path = "./previous_years/ft_processed/csv/"  # TODO
-data_path = "./codalab/DATASETS/public_data_development/"
-data_eval_path = "./codalab/DATASETS/public_data_task1/"
-# data_path = "../TASS2019/DATASETS/public_data/"
 
 print("Loading Spacy Model")
 lemmatizer = spacy.load("es_core_news_sm")  # GLOBAL to avoid loading the model several times
 
 print("Loading NLTK stuff")
 stemmer = nltk.stem.SnowballStemmer('spanish')
-regex_uppercase = re.compile(r"\b[A-Z][A-Z]+\b")
+regex_uppercase = re.compile(r"\b[A-Z][A-Z]+\b")  # TODO
 stopwords = nltk.corpus.stopwords.words('spanish')
 
-emoji_pattern = re.compile("[" 
-                           u"\U0001F600-\U0001F64F"  # emoticons
-                           u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-                           u"\U0001F680-\U0001F6FF"  # transport & map symbols
-                           u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-                           u"\U00002702-\U000027B0"
-                           u"\U000024C2-\U0001F251"
-                           "]+", flags=re.UNICODE)
 
 
-def get_dataframe_from_xml(data):
-    print("Preparing data...")
-    tweet_id, user, content, day_of_week, month, hour, lang, sentiment, ternary_sentiment = [], [], [], [], [], [], [], [], []
-    for tweet in data.iter('tweet'):
-        for element in tweet.iter():
-            if element.tag == 'tweetid':
-                tweet_id.append(element.text)
-            elif element.tag == 'user':
-                user.append(element.text)
-            elif element.tag == 'content':
-                content.append(element.text)
-            elif element.tag == 'date':
-                day_of_week.append(element.text[:3])
-                month.append(element.text[4:7])
-                hour.append(element.text[11:13])
-            elif element.tag == 'lang':
-                lang.append(element.text)
-            elif element.tag == 'value':
-                sentiment.append(element.text)
-                if element.text == 'NONE' or element.text == 'NEU':
-                    ternary_sentiment.append('N-N')
-                else:
-                    ternary_sentiment.append(element.text)
-
-    result_df = pd.DataFrame()
-    result_df['tweet_id'] = tweet_id
-    # result_df['user'] = user
-    result_df['content'] = content
-    # result_df['lang'] = lang
-    result_df['day_of_week'] = day_of_week
-    result_df['month'] = month
-    result_df['hour'] = hour
-
-    LABEL_ENCODER.fit(sentiment)
-    TERNARY_LABEL_ENCODER.fit(ternary_sentiment)
-    result_df['sentiment'] = LABEL_ENCODER.transform(sentiment)
-    result_df['ternary_sentiment'] = TERNARY_LABEL_ENCODER.transform(ternary_sentiment)
-    return result_df
 
 
 def extract_length_feature(tokenized_dataframe):
@@ -194,29 +139,15 @@ def get_sentiment_vocabulary(data, positive, negative):
         elif sentiment == negative:
             pos_neg_tweets.append(tweet)
             pos_neg_bool_labels.append(False)
-    # positive_vocabulary, negative_vocabulary = keyterms.most_discriminating_terms(pos_neg_tweets, pos_neg_bool_labels)
+    positive_vocabulary, negative_vocabulary = keyterms.most_discriminating_terms(pos_neg_tweets, pos_neg_bool_labels)
 
     pos_df = pd.read_csv('./lexicons/isol/positivas_mejorada.csv', encoding='latin-1', header=None, names=['words'])
     neg_df = pd.read_csv('./lexicons/isol/negativas_mejorada.csv', encoding='latin-1', header=None, names=['words'])
 
-    return pos_df['words'].array, neg_df['words'].array
-
-
-def text_preprocessing(data):
-    result = data
-    result = [tweet.replace('\n', '').strip() for tweet in result]  # Newline and leading/trailing spaces
-    result = [emoji_pattern.sub(r'', tweet) for tweet in result]
-    result = [tweet.replace(u'\u2018', "'").replace(u'\u2019', "'") for tweet in result]  # Quotes replace by general
-    result = [re.sub(r"\B#\w+", lambda m: camel_case_split(m.group(0)), tweet) for tweet in result]  # Hashtag
-    result = [tweet.lower() for tweet in result]
-    result = [re.sub(r"^.*http.*$", 'http', tweet) for tweet in result]  # Remove all http contents
-    result = [re.sub(r"\B@\w+", '', tweet) for tweet in result]  # Remove all usernames
-    result = [re.sub(r"(\w)(\1{2,})", r"\1", tweet) for tweet in result]  # Remove all letter repetitions
-    result = [re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'jajaja', tweet) for tweet in result]  # Normalize laughs
-    result = [re.sub(r"\d+", '', tweet) for tweet in result]  # Remove all numbers
-    result = [tweet.translate(str.maketrans('', '', string.punctuation + '¡')) for tweet in result]  # Remove punctuation
-
-    return result
+    if bLexicons:
+        return pos_df['words'].array, neg_df['words'].array
+    else:
+        return positive_vocabulary, negative_vocabulary
 
 
 def perform_upsampling(dataframe):
@@ -226,12 +157,6 @@ def perform_upsampling(dataframe):
     df['sentiment'] = y_resampled
     df = df.sample(frac=1).reset_index(drop=True)
     return df
-
-
-def camel_case_split(identifier):
-    clean_identifier = re.sub('[#]', '', identifier)
-    matches = finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", clean_identifier)
-    return ' '.join([m.group(0) for m in matches])
 
 
 def libreoffice_processing(tokenized_data):
@@ -400,7 +325,7 @@ def read_files(sLang, bCross):
     train_data = pd.DataFrame()
     dev_data = pd.DataFrame()
     tst_data = None
-    eval_data = None
+    eval_data = pd.DataFrame()
 
     if bCross is True:
         dev_cross_data = pd.DataFrame()
@@ -421,9 +346,13 @@ def read_files(sLang, bCross):
         tree_train = ET.parse(data_path + sLang + "/intertass_" + sLang + "_train.xml")
         train_data = get_dataframe_from_xml(tree_train)
 
-    if bEvalPhase:
-        tree_eval = ET.parse(data_eval_path + "intertass_" + sLang + "_test.xml")
-        eval_data = get_dataframe_from_xml(tree_eval)
+    tree_eval = ET.parse(data_eval_path + "intertass_" + sLang + "_test.xml")
+    eval_data = get_dataframe_from_xml(tree_eval)
+    eval_labels_df = pd.read_csv('./tass_test_gold/' + sLang + '.tsv', delimiter='\t', header=None)
+    eval_labels_df.columns = ['tweet_id', 'sentiment']
+    label_encoder = preprocessing.LabelEncoder()
+    eval_labels_df['sentiment'] = label_encoder.fit_transform(eval_labels_df.sentiment.values)
+    eval_data['sentiment'] = eval_labels_df['sentiment']
 
     if bTestPhase:
         tst_data = pd.read_csv(data_test_path + sLang + '_general_test.csv', delimiter='\t')
@@ -469,10 +398,8 @@ if __name__ == '__main__':
     output_dir = "./final_outputs/"
     for bCross in CROSS_LINGUAL:
 
-        if bCross:
-            continue
-
         print('----------------- CROSS : ' + str(bCross) + ' ----------------')
+
 
         bTern = False  # Set to True for training with NEU and NONE as one category
         prefix = 'LR'
@@ -490,6 +417,8 @@ if __name__ == '__main__':
             if bUpsampling:
                 train_data = perform_upsampling(train_data)
 
+            print(eval_data['sentiment'].value_counts())
+
             # PRE-PROCESSING
             preprocessed_train_content = text_preprocessing(train_data['content'])
             preprocessed_dev_content = text_preprocessing(dev_data['content'])
@@ -506,44 +435,44 @@ if __name__ == '__main__':
             if bEvalPhase is True:
                 tokenized_eval_data = tokenize_list(preprocessed_eval_content)
 
-            # FEATURE EXTRACTION
-            train_data['tweet_length'] = extract_length_feature(tokenized_train_content)
-            train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
-            train_data['question_mark'] = extract_question_mark_feature(train_data['content'])
-            train_data['exclamation_mark'] = extract_exclamation_mark_feature(train_data['content'])
-            train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
-            train_data['hashtag_number'] = extract_hashtag_number_feature(train_data['content'])
-            train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = \
-                extract_sent_words_feature(tokenized_train_content, tokenized_train_content)
-
-            dev_data['tweet_length'] = extract_length_feature(tokenized_dev_content)
-            dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
-            dev_data['question_mark'] = extract_question_mark_feature(dev_data['content'])
-            dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['content'])
-            dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
-            dev_data['hashtag_number'] = extract_hashtag_number_feature(dev_data['content'])
-            dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = \
-                extract_sent_words_feature(tokenized_dev_content, tokenized_train_content)
-
-            if bTestPhase:
-                tst_data['tweet_length'] = extract_length_feature(tokenized_tst_data)
-                tst_data['has_uppercase'] = extract_uppercase_feature(tst_data['content'])
-                tst_data['question_mark'] = extract_question_mark_feature(tst_data['content'])
-                tst_data['exclamation_mark'] = extract_exclamation_mark_feature(tst_data['content'])
-                tst_data['letter_repetition'] = extract_letter_repetition_feature(tst_data['content'])
-                tst_data['hashtag_number'] = extract_hashtag_number_feature(tst_data['content'])
-                tst_data['pos_voc'], tst_data['neg_voc'], tst_data['neu_voc'], tst_data['none_voc'] = \
-                    extract_sent_words_feature(tokenized_tst_data, tokenized_train_content)
-
-            if bEvalPhase:
-                eval_data['tweet_length'] = extract_length_feature(tokenized_eval_data)
-                eval_data['has_uppercase'] = extract_uppercase_feature(eval_data['content'])
-                eval_data['question_mark'] = extract_question_mark_feature(eval_data['content'])
-                eval_data['exclamation_mark'] = extract_exclamation_mark_feature(eval_data['content'])
-                eval_data['letter_repetition'] = extract_letter_repetition_feature(eval_data['content'])
-                eval_data['hashtag_number'] = extract_hashtag_number_feature(eval_data['content'])
-                eval_data['pos_voc'], eval_data['neg_voc'], eval_data['neu_voc'], eval_data['none_voc'] = \
-                    extract_sent_words_feature(tokenized_eval_data, tokenized_train_content)
+            # # FEATURE EXTRACTION
+            # train_data['tweet_length'] = extract_length_feature(tokenized_train_content)
+            # train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
+            # train_data['question_mark'] = extract_question_mark_feature(train_data['content'])
+            # train_data['exclamation_mark'] = extract_exclamation_mark_feature(train_data['content'])
+            # train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
+            # train_data['hashtag_number'] = extract_hashtag_number_feature(train_data['content'])
+            # train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = \
+            #     extract_sent_words_feature(tokenized_train_content, tokenized_train_content)
+            #
+            # dev_data['tweet_length'] = extract_length_feature(tokenized_dev_content)
+            # dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
+            # dev_data['question_mark'] = extract_question_mark_feature(dev_data['content'])
+            # dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['content'])
+            # dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
+            # dev_data['hashtag_number'] = extract_hashtag_number_feature(dev_data['content'])
+            # dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = \
+            #     extract_sent_words_feature(tokenized_dev_content, tokenized_train_content)
+            #
+            # if bTestPhase:
+            #     tst_data['tweet_length'] = extract_length_feature(tokenized_tst_data)
+            #     tst_data['has_uppercase'] = extract_uppercase_feature(tst_data['content'])
+            #     tst_data['question_mark'] = extract_question_mark_feature(tst_data['content'])
+            #     tst_data['exclamation_mark'] = extract_exclamation_mark_feature(tst_data['content'])
+            #     tst_data['letter_repetition'] = extract_letter_repetition_feature(tst_data['content'])
+            #     tst_data['hashtag_number'] = extract_hashtag_number_feature(tst_data['content'])
+            #     tst_data['pos_voc'], tst_data['neg_voc'], tst_data['neu_voc'], tst_data['none_voc'] = \
+            #         extract_sent_words_feature(tokenized_tst_data, tokenized_train_content)
+            #
+            # if bEvalPhase:
+            #     eval_data['tweet_length'] = extract_length_feature(tokenized_eval_data)
+            #     eval_data['has_uppercase'] = extract_uppercase_feature(eval_data['content'])
+            #     eval_data['question_mark'] = extract_question_mark_feature(eval_data['content'])
+            #     eval_data['exclamation_mark'] = extract_exclamation_mark_feature(eval_data['content'])
+            #     eval_data['letter_repetition'] = extract_letter_repetition_feature(eval_data['content'])
+            #     eval_data['hashtag_number'] = extract_hashtag_number_feature(eval_data['content'])
+            #     eval_data['pos_voc'], eval_data['neg_voc'], eval_data['neu_voc'], eval_data['none_voc'] = \
+            #         extract_sent_words_feature(tokenized_eval_data, tokenized_train_content)
 
             # clean_train_content = tokenized_train_content  # remove_stopwords(tokenized_train_content)
             # clean_dev_content = tokenized_dev_data  # remove_stopwords(tokenized_dev_data)
@@ -559,10 +488,12 @@ if __name__ == '__main__':
             #     libreoffice_eval_tweets = [row for row in libreoffice_processing(tokenized_eval_data)]
 
             # LEMMATIZING
-            # lemmatized_train_tweets = lemmatize_list(preprocessed_train_content)
-            # lemmatized_dev_tweets = lemmatize_list(preprocessed_dev_content)
-            # if bTestPhase is True:
-            #     lemmatized_tst_tweets = lemmatize_list(preprocessed_tst_content)
+            lemmatized_train_tweets = lemmatize_list(preprocessed_train_content)
+            lemmatized_dev_tweets = lemmatize_list(preprocessed_dev_content)
+            if bTestPhase is True:
+                lemmatized_tst_tweets = lemmatize_list(preprocessed_tst_content)
+            if bEvalPhase is True:
+                lemmatized_eval_tweets = lemmatize_list(preprocessed_eval_content)
 
             # # REMOVING ACCENTS
             # without_accents_train = remove_accents(lemmatized_train_tweets)
@@ -570,21 +501,22 @@ if __name__ == '__main__':
             # if bTestPhase is True:
             #   without_accents_tst = remove_accents(lemmatized_tst_tweets)
 
-            final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in tokenized_train_content]
-            final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in tokenized_dev_content]
+            final_train_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_train_tweets]
+            final_dev_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_dev_tweets]
             if bTestPhase is True:
-                final_tst_content = [TreebankWordDetokenizer().detokenize(row) for row in tokenized_tst_data]
+                final_tst_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_dev_tweets]
             if bEvalPhase is True:
-                final_eval_content = [TreebankWordDetokenizer().detokenize(row) for row in tokenized_eval_data]
+                final_eval_content = [TreebankWordDetokenizer().detokenize(row) for row in lemmatized_eval_tweets]
 
             # COUNT VECTORS
-            # if bTestPhase is True and bCross is True:  # Add train + dev to have more data
-            #     x_train_count_vectors, x_tst_count_vectors = perform_count_vectors(final_train_content, final_tst_content)
-            # elif bTestPhase is True:
-            #     x_train_count_vectors, x_tst_count_vectors = perform_count_vectors(final_train_content + final_dev_content,
-            #                                                                                             final_tst_content)
-            # else:
-            #     x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_dev_content)
+            if bEvalPhase is True and bCross is True:  # Add train + dev to have more data
+                x_train_count_vectors, x_eval_count_vectors = perform_count_vectors(final_train_content, final_eval_content)
+            elif bEvalPhase is True:
+                x_train_count_vectors, x_eval_count_vectors = perform_count_vectors(final_train_content, final_eval_content)
+            elif bTestPhase:
+                x_tst_count_vectors = []
+            else:
+                x_train_count_vectors, x_dev_count_vectors = perform_count_vectors(final_train_content, final_dev_content)
 
 
             # # TF-IDF VECTORS
@@ -595,59 +527,59 @@ if __name__ == '__main__':
             # else:
             #     xtrain_tfidf, xdev_tfidf = perform_tf_idf_vectors(final_train_content, final_dev_content)
 
-            train_features = pd.DataFrame({
-                'tweet_length': train_data['tweet_length'],
-                'has_uppercase': train_data['has_uppercase'],
-                'exclamation_mark': train_data['exclamation_mark'],
-                'question_mark': train_data['question_mark'],
-                'hashtag_number': train_data['hashtag_number'],
-                'pos_voc': train_data['pos_voc'],
-                'neg_voc': train_data['neg_voc'],
-                'neu_voc': train_data['neu_voc'],
-                'none_voc': train_data['none_voc'],
-                'letter_repetition': train_data['letter_repetition']
-            })
-
-            dev_features = pd.DataFrame({
-                'tweet_length': dev_data['tweet_length'],
-                'has_uppercase': dev_data['has_uppercase'],
-                'exclamation_mark': dev_data['exclamation_mark'],
-                'question_mark': dev_data['question_mark'],
-                'hashtag_number': dev_data['hashtag_number'],
-                'pos_voc': dev_data['pos_voc'],
-                'neg_voc': dev_data['neg_voc'],
-                'neu_voc': dev_data['neu_voc'],
-                'none_voc': dev_data['none_voc'],
-                'letter_repetition': dev_data['letter_repetition']
-            })
-
-            if bTestPhase is True:
-                tst_features = pd.DataFrame({
-                    'tweet_length': tst_data['tweet_length'],
-                    'has_uppercase': tst_data['has_uppercase'],
-                    'exclamation_mark': tst_data['exclamation_mark'],
-                    'question_mark': tst_data['question_mark'],
-                    'hashtag_number': tst_data['hashtag_number'],
-                    'pos_voc': tst_data['pos_voc'],
-                    'neg_voc': tst_data['neg_voc'],
-                    'neu_voc': tst_data['neu_voc'],
-                    'none_voc': tst_data['none_voc'],
-                    'letter_repetition': tst_data['letter_repetition']
-                })
-
-            if bEvalPhase is True:
-                eval_features = pd.DataFrame({
-                    'tweet_length': eval_data['tweet_length'],
-                    'has_uppercase': eval_data['has_uppercase'],
-                    'exclamation_mark': eval_data['exclamation_mark'],
-                    'question_mark': eval_data['question_mark'],
-                    'hashtag_number': eval_data['hashtag_number'],
-                    'pos_voc': eval_data['pos_voc'],
-                    'neg_voc': eval_data['neg_voc'],
-                    'neu_voc': eval_data['neu_voc'],
-                    'none_voc': eval_data['none_voc'],
-                    'letter_repetition': eval_data['letter_repetition']
-                })
+            # train_features = pd.DataFrame({
+            #     'tweet_length': train_data['tweet_length'],
+            #     'has_uppercase': train_data['has_uppercase'],
+            #     'exclamation_mark': train_data['exclamation_mark'],
+            #     'question_mark': train_data['question_mark'],
+            #     'hashtag_number': train_data['hashtag_number'],
+            #     'pos_voc': train_data['pos_voc'],
+            #     'neg_voc': train_data['neg_voc'],
+            #     'neu_voc': train_data['neu_voc'],
+            #     'none_voc': train_data['none_voc'],
+            #     'letter_repetition': train_data['letter_repetition']
+            # })
+            #
+            # dev_features = pd.DataFrame({
+            #     'tweet_length': dev_data['tweet_length'],
+            #     'has_uppercase': dev_data['has_uppercase'],
+            #     'exclamation_mark': dev_data['exclamation_mark'],
+            #     'question_mark': dev_data['question_mark'],
+            #     'hashtag_number': dev_data['hashtag_number'],
+            #     'pos_voc': dev_data['pos_voc'],
+            #     'neg_voc': dev_data['neg_voc'],
+            #     'neu_voc': dev_data['neu_voc'],
+            #     'none_voc': dev_data['none_voc'],
+            #     'letter_repetition': dev_data['letter_repetition']
+            # })
+            #
+            # if bTestPhase is True:
+            #     tst_features = pd.DataFrame({
+            #         'tweet_length': tst_data['tweet_length'],
+            #         'has_uppercase': tst_data['has_uppercase'],
+            #         'exclamation_mark': tst_data['exclamation_mark'],
+            #         'question_mark': tst_data['question_mark'],
+            #         'hashtag_number': tst_data['hashtag_number'],
+            #         'pos_voc': tst_data['pos_voc'],
+            #         'neg_voc': tst_data['neg_voc'],
+            #         'neu_voc': tst_data['neu_voc'],
+            #         'none_voc': tst_data['none_voc'],
+            #         'letter_repetition': tst_data['letter_repetition']
+            #     })
+            #
+            # if bEvalPhase is True:
+            #     eval_features = pd.DataFrame({
+            #         'tweet_length': eval_data['tweet_length'],
+            #         'has_uppercase': eval_data['has_uppercase'],
+            #         'exclamation_mark': eval_data['exclamation_mark'],
+            #         'question_mark': eval_data['question_mark'],
+            #         'hashtag_number': eval_data['hashtag_number'],
+            #         'pos_voc': eval_data['pos_voc'],
+            #         'neg_voc': eval_data['neg_voc'],
+            #         'neu_voc': eval_data['neu_voc'],
+            #         'none_voc': eval_data['none_voc'],
+            #         'letter_repetition': eval_data['letter_repetition']
+            #     })
 
             # CONCATENATE VECTORS AND FEATURES
 
@@ -675,16 +607,18 @@ if __name__ == '__main__':
 
             # TRAINING
             # Choose the training, development and test sets
-            training_set = train_features
+            training_set = x_train_count_vectors
             training_labels = train_data['sentiment']
-            dev_set = dev_features
-            dev_labels = dev_data['sentiment']
+
             if bTestPhase is True:
-                tst_set = tst_features
+                tst_set = x_tst_count_vectors
                 tst_labels = tst_data['sentiment']
-            if bEvalPhase:
-                eval_set = eval_features
-                eval_labels = None  # We don't have the eval labels yet
+            elif bEvalPhase:
+                eval_set = x_eval_count_vectors
+                eval_labels = eval_data['sentiment']  # We don't have the eval labels yet
+            else:
+                dev_set = x_dev_count_vectors
+                dev_labels = dev_data['sentiment']
 
 
             # WORD EMBEDDINGS
@@ -748,6 +682,8 @@ if __name__ == '__main__':
             gb = GradientBoostingClassifier()
             sgd = SGDClassifier()
 
+            print(training_set)
+
             all_classifiers = [lr, nb, ada, gb]
             all_classif_names = ['LR', 'NB', 'ADA', 'GB']
             all_predictions, all_vsr_predictions, all_vso_predictions = [], [], []
@@ -761,24 +697,26 @@ if __name__ == '__main__':
                 vsr_clf = OneVsRestClassifier(clf)
                 vso_clf = OneVsOneClassifier(clf)
 
-                classif, preds, probs = train_model(clf, training_set, training_labels, dev_set, dev_labels,
-                                                    'NORMAL', bTern)
-                vsr_classif, vsr_preds, vsr_probs = train_model(vsr_clf, training_set, training_labels, dev_set,
-                                                                dev_labels, 'ONE VS ALL', bTern)
-                vso_classif, vso_preds, vso_probs = train_model(vso_clf, training_set, training_labels, dev_set,
-                                                                dev_labels, 'ONE VS ONE', bTern, True)
                 if bTestPhase:
                     a, tst_probs = get_predictions(classif, tst_set)
                     b, tst_vsr_probs = get_predictions(vsr_classif, tst_set)
                     c, tst_vso_probs = get_predictions(vso_classif, tst_set, is_vso=True)
 
-                if bEvalPhase:
+                elif bEvalPhase:
                     classif, preds, probs = train_model(clf, training_set, training_labels, eval_set, eval_labels,
                                                         'NORMAL', bTern)
                     vsr_classif, vsr_preds, vsr_probs = train_model(vsr_clf, training_set, training_labels, eval_set,
                                                                     eval_labels, 'ONE VS ALL', bTern)
                     vso_classif, vso_preds, vso_probs = train_model(vso_clf, training_set, training_labels, eval_set,
                                                                     eval_labels, 'ONE VS ONE', bTern, True)
+
+                else:
+                    classif, preds, probs = train_model(clf, training_set, training_labels, dev_set, dev_labels,
+                                                        'NORMAL', bTern)
+                    vsr_classif, vsr_preds, vsr_probs = train_model(vsr_clf, training_set, training_labels, dev_set,
+                                                                    dev_labels, 'ONE VS ALL', bTern)
+                    vso_classif, vso_preds, vso_probs = train_model(vso_clf, training_set, training_labels, dev_set,
+                                                                    dev_labels, 'ONE VS ONE', bTern, True)
 
                 all_predictions.append(preds)
                 all_probabilities.append(probs)
@@ -788,119 +726,135 @@ if __name__ == '__main__':
                 all_vso_probabilities.append(vso_probs)
                 print()
 
-            if not bEvalPhase:
+            if bEvalPhase:
+                print("VOTING ENSEMBLE")
+                print_confusion_matrix(get_averaged_predictions(all_probabilities), eval_labels)
+                print()
+            else:
                 print("VOTING ENSEMBLE")
                 print_confusion_matrix(get_averaged_predictions(all_probabilities), dev_labels)
                 print()
 
-            str_mode = 'cross' if bCross else 'mono'
-            str_phase = 'test' if bTestPhase else 'dev'
-            str_full_reduced = 'reduced' if bTern else 'full'
+            # str_mode = 'cross' if bCross else 'mono'
+            # str_phase = 'test' if bEvalPhase else 'dev'
+            # str_full_reduced = 'reduced' if bTern else 'full'
+            # #
+            # # FASTTEXT
+            # fasttext_df = fasttext_to_df('./new_fasttext/{0}/{1}/{2}_{1}_{0}.out'.format(str_mode, str_phase, sLang))
+            #
+            # # Use only if you want to use the fasttext from fasttext folder, not from new_fasttext
+            # # fasttext_path = './fasttext/{}_fasttext_outputs_dev-test_full-reduced/'.format(str_mode)
+            # # fasttext_file = '{}_{}_fasttext_{}.csv'.format(sLang, str_phase, str_full_reduced)
+            # # fasttext_df = pd.read_csv(fasttext_path + fasttext_file)
+            # # fasttext_df = fasttext_df.drop(columns='ID')
+            #
+            # print("FASTTEXT MODEL")
+            # fasttext_probabilities = fasttext_df.to_numpy()
+            # fasttext_predictions = fasttext_probabilities.argmax(1)
+            # if bEvalPhase:
+            #     print_confusion_matrix(fasttext_predictions, eval_labels)
+            # else:
+            #     print_confusion_matrix(fasttext_predictions, dev_labels)
+            # print()
 
-            # FASTTEXT
-            fasttext_df = fasttext_to_df('./new_fasttext/{0}/{1}/{2}_{1}_{0}.out'.format(str_mode, str_phase, sLang))
-
-            # Use only if you want to use the fasttext from fasttext folder, not from new_fasttext
-            # fasttext_path = './fasttext/{}_fasttext_outputs_dev-test_full-reduced/'.format(str_mode)
-            # fasttext_file = '{}_{}_fasttext_{}.csv'.format(sLang, str_phase, str_full_reduced)
-            # fasttext_df = pd.read_csv(fasttext_path + fasttext_file)
-            # fasttext_df = fasttext_df.drop(columns='ID')
-
-            print("FASTTEXT MODEL")
-            fasttext_probabilities = fasttext_df.to_numpy()
-            fasttext_predictions = fasttext_probabilities.argmax(1)
-            if not bEvalPhase:
-                print_confusion_matrix(fasttext_predictions, dev_labels)
-            print()
-
-            # BERT
-            print("BERT MODEL")
-            if not (bTern and bCross):  # The only mode without predictions
-                bert_path = './bert/{}_bert_dev-test_full-reduced/'.format(str_mode)
-                bert_file = '{}_{}_bert_{}.csv'.format(sLang, str_phase, str_full_reduced)
-
-                bert_df = pd.read_csv(bert_path + bert_file)
-                bert_df = bert_df.drop(bert_df.columns[0], axis=1)
-                bert_df = bert_df.drop(columns='id')
-
-                bert_probabilities = bert_df.to_numpy()
-                bert_predictions = bert_probabilities.argmax(1)
-                if not bEvalPhase:
-                    print_confusion_matrix(bert_predictions, dev_labels)
-                print()
-
-            # GLOVE + BPE + W2V
-            print("G+B+W MODEL")
-            gbw_path = './outputs_flair_bpe_glove_w2v_clean_May29/{}/{}/'.format(sLang, str_mode)
-            gbw_file = '{}_test_glove_word2vec_bpe_forTest_full.csv'.format(sLang, str_phase, str_mode)
-
-            gbw_df = pd.read_csv(gbw_path + gbw_file, sep=',')
-            gbw_df = gbw_df.drop(gbw_df.columns[0], axis=1)
-            # gbw_df = gbw_df.drop(columns='ID')
-
-            gbw_probabilities = gbw_df.to_numpy()
-            gbw_predictions = gbw_probabilities.argmax(1)
-            if not bEvalPhase:
-                print_confusion_matrix(gbw_predictions, dev_labels)
-            print()
-
-            print('-------------- FINAL ENSEMBLE --------------')
-            print()
-
-            print('From Normal Models:')
-            print()
+            # # BERT
+            # print("BERT MODEL")
+            # if not (bTern and bCross):  # The only mode without predictions
+            #     bert_path = './bert/{}_bert_dev-test_full-reduced/'.format(str_mode)
+            #     bert_file = '{}_{}_bert_{}.csv'.format(sLang, str_phase, str_full_reduced)
+            #
+            #     bert_df = pd.read_csv(bert_path + bert_file)
+            #     bert_df = bert_df.drop(bert_df.columns[0], axis=1)
+            #     bert_df = bert_df.drop(columns='id')
+            #
+            #     bert_probabilities = bert_df.to_numpy()
+            #     bert_predictions = bert_probabilities.argmax(1)
+            #     if bEvalPhase:
+            #         print_confusion_matrix(bert_predictions, eval_labels)
+            #     else:
+            #         print_confusion_matrix(bert_predictions, dev_labels)
+            #     print()
+            #
+            # # GLOVE + BPE + W2V
+            # print("G+B+W MODEL")
+            # gbw_path = './outputs_flair_bpe_glove_w2v_clean_May29/{}/{}/'.format(sLang, str_mode)
+            # gbw_file = '{}_test_glove_word2vec_bpe_forTest_full.csv'.format(sLang, str_phase, str_mode)
+            #
+            # gbw_df = pd.read_csv(gbw_path + gbw_file, sep=',')
+            # gbw_df = gbw_df.drop(gbw_df.columns[0], axis=1)
+            # # gbw_df = gbw_df.drop(columns='ID')
+            #
+            # gbw_probabilities = gbw_df.to_numpy()
+            # gbw_predictions = gbw_probabilities.argmax(1)
+            # if bEvalPhase:
+            #     print_confusion_matrix(gbw_predictions, eval_labels)
+            # # else:
+            #     # print_confusion_matrix(gbw_predictions, dev_labels)
+            # print()
+            #
+            # print('-------------- FINAL ENSEMBLE --------------')
+            # print()
+            #
+            # print('From Normal Models:')
+            # print()
 
             submitting_predictions = []
 
-            for i, prob_matrix in enumerate(all_probabilities):
-                print('With ' + all_classif_names[i])
-                probabilities_for_voting_ensemble = [
-                    # bert_probabilities,
-                    gbw_probabilities,
-                    # fasttext_probabilities,
-                    prob_matrix
-                ]
-                final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
-                all_final_predictions.append(final_predictions)
-
-                if not bEvalPhase:
-                    print_confusion_matrix(final_predictions, dev_labels)
-                print()
-
-            print('From OneVsRest Models:')
-            print()
-
-            for i, prob_matrix in enumerate(all_vsr_probabilities):
-                print('With ' + all_classif_names[i])
-                probabilities_for_voting_ensemble = [
-                    # bert_probabilities,
-                    gbw_probabilities,
-                    # fasttext_probabilities,
-                    prob_matrix
-                ]
-                final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
-                all_vsr_final_predictions.append(final_predictions)
-
-                if not bEvalPhase:
-                    print_confusion_matrix(final_predictions, dev_labels)
-                print()
-
-            print('From OneVsOne Models:')
-            print()
-            for i, prob_matrix in enumerate(all_vso_probabilities):
-                print('With ' + all_classif_names[i])
-                probabilities_for_voting_ensemble = [
-                    # bert_probabilities,
-                    gbw_probabilities,
-                    # fasttext_probabilities,
-                    prob_matrix
-                ]
-                final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
-                all_vso_final_predictions.append(final_predictions)
-
-                if not bEvalPhase:
-                    print_confusion_matrix(final_predictions, dev_labels)
-                print()
+            # for i, prob_matrix in enumerate(all_probabilities):
+            #     print('With ' + all_classif_names[i])
+            #     probabilities_for_voting_ensemble = [
+            #         # bert_probabilities,
+            #         # gbw_probabilities,
+            #         fasttext_probabilities,
+            #         prob_matrix
+            #     ]
+            #     final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
+            #     all_final_predictions.append(final_predictions)
+            #
+            #     if bEvalPhase:
+            #         print_confusion_matrix(final_predictions, eval_labels)
+            #     else:
+            #         print_confusion_matrix(final_predictions, dev_labels)
+            #     print()
+            #
+            # print('From OneVsRest Models:')
+            # print()
+            #
+            # for i, prob_matrix in enumerate(all_vsr_probabilities):
+            #     print('With ' + all_classif_names[i])
+            #     probabilities_for_voting_ensemble = [
+            #         # bert_probabilities,
+            #         # gbw_probabilities,
+            #         fasttext_probabilities,
+            #         prob_matrix
+            #     ]
+            #     final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
+            #     all_vsr_final_predictions.append(final_predictions)
+            #
+            #     if bEvalPhase:
+            #         print_confusion_matrix(final_predictions, eval_labels)
+            #     else:
+            #         print_confusion_matrix(final_predictions, dev_labels)
+            #     print()
+            #
+            # print('From OneVsOne Models:')
+            # print()
+            # for i, prob_matrix in enumerate(all_vso_probabilities):
+            #     print('With ' + all_classif_names[i])
+            #     probabilities_for_voting_ensemble = [
+            #         # bert_probabilities,
+            #         # gbw_probabilities,
+            #         fasttext_probabilities,
+            #         prob_matrix
+            #     ]
+            #     final_predictions = get_averaged_predictions(probabilities_for_voting_ensemble)
+            #     all_vso_final_predictions.append(final_predictions)
+            #
+            #     if bEvalPhase:
+            #         print_confusion_matrix(final_predictions, eval_labels)
+            #     else:
+            #         print_confusion_matrix(final_predictions, dev_labels)
+            #     print()
 
             print()
             print()
@@ -923,45 +877,45 @@ if __name__ == '__main__':
             # print_confusion_matrix(xgboost_predictions, dev_labels)
 
             # Decide which outputs to export: ['LR', 'NB', 'SVM' 'DT', 'RF', 'ET', 'ADA', 'GB', 'SGD']
-            if bCross:
-                if sLang == 'es':
-                    submitting_predictions = all_final_predictions[0]
-                elif sLang == 'cr':
-                    submitting_predictions = all_final_predictions[1]
-                elif sLang == 'mx':
-                    submitting_predictions = all_final_predictions[0]
-                elif sLang == 'pe':
-                    submitting_predictions = all_vsr_final_predictions[3]
-                elif sLang == 'uy':
-                    submitting_predictions = all_vsr_final_predictions[3]
-            else:
-                if sLang == 'es':
-                    submitting_predictions = all_final_predictions[0]
-                elif sLang == 'cr':
-                    submitting_predictions = all_vsr_final_predictions[1]
-                elif sLang == 'mx':
-                    submitting_predictions = all_final_predictions[2]
-                elif sLang == 'pe':
-                    submitting_predictions = all_final_predictions[0]
-                elif sLang == 'uy':
-                    submitting_predictions = all_final_predictions[2]
+            # if bCross:
+            #     if sLang == 'es':
+            #         submitting_predictions = all_final_predictions[0]
+            #     elif sLang == 'cr':
+            #         submitting_predictions = all_final_predictions[1]
+            #     elif sLang == 'mx':
+            #         submitting_predictions = all_final_predictions[0]
+            #     elif sLang == 'pe':
+            #         submitting_predictions = all_vsr_final_predictions[3]
+            #     elif sLang == 'uy':
+            #         submitting_predictions = all_vsr_final_predictions[3]
+            # else:
+            #     if sLang == 'es':
+            #         submitting_predictions = all_final_predictions[0]
+            #     elif sLang == 'cr':
+            #         submitting_predictions = all_vsr_final_predictions[1]
+            #     elif sLang == 'mx':
+            #         submitting_predictions = all_final_predictions[2]
+            #     elif sLang == 'pe':
+            #         submitting_predictions = all_final_predictions[0]
+            #     elif sLang == 'uy':
+            #         submitting_predictions = all_final_predictions[2]
 
-            if os.path.exists(output_dir) is False:
-                print("Creating output directory " + output_dir)
-                os.makedirs(output_dir)
-
-            # with open(data_path + "final_outputs/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
+            # if os.path.exists(output_dir) is False:
+            #     print("Creating output directory " + output_dir)
+            #     os.makedirs(output_dir)
+            #
+            # # with open(data_path + "final_outputs/" + cross + LANGUAGE_CODE + ".tsv", 'w', newline='') as out_file:
+            # #     tsv_writer = csv.writer(out_file, delimiter='\t')
+            # #     for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_word_predictions)):
+            # #         tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
+            #
+            # with open(output_dir + sLang + ".tsv", 'w', newline='') as out_file:
             #     tsv_writer = csv.writer(out_file, delimiter='\t')
-            #     for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(lr_word_predictions)):
-            #         tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
-
-            with open(output_dir + sLang + ".tsv", 'w', newline='') as out_file:
-                tsv_writer = csv.writer(out_file, delimiter='\t')
-                for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(submitting_predictions)):
-                    if bEvalPhase:
-                        tsv_writer.writerow([eval_data['tweet_id'][i], prediction])
-                    else:
-                        tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
+            #     for i, prediction in enumerate(LABEL_ENCODER.inverse_transform(submitting_predictions)):
+            #         if bEvalPhase:
+            #             tsv_writer.writerow([eval_data['tweet_id'][i], prediction])
+            #         else:
+            #             tsv_writer.writerow([dev_data['tweet_id'][i], prediction])
 
             # with zipfile.ZipFile(output_dir + prefix + '_' + sLang + ".zip", 'w') as file_zip:
             #     print("Creating zip file: " + output_dir + prefix + '_' + sLang + ".zip")
