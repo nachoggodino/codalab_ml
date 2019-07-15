@@ -2,6 +2,8 @@ import pandas
 from sklearn import preprocessing
 import xml.etree.ElementTree as ET
 
+from nltk.tokenize.treebank import TreebankWordDetokenizer
+
 
 def parse_xml(filepath):
     parser = ET.XMLParser(encoding='utf-8')
@@ -42,8 +44,12 @@ def get_dataframe_from_xml(data, encode_label=True):
 
     if encode_label:
         encoder = preprocessing.LabelEncoder()
-        encoder.fit_transform(sentiment)
+        sentiment = encoder.fit_transform(sentiment)
 
     result_df['sentiment'] = sentiment
 
     return result_df
+
+
+def untokenize_sentence(simple_list):
+    return TreebankWordDetokenizer().detokenize(simple_list)
