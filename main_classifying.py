@@ -6,6 +6,7 @@ import nltk
 import unidecode
 import spacy
 import hunspell
+import swifter
 
 import utils
 import tweet_preprocessing
@@ -60,16 +61,17 @@ import warnings
 warnings.filterwarnings('ignore')
 
 LANGUAGE_CODE = ['es', 'cr', 'mx', 'pe', 'uy']
+oovs_avg = 0
 
 # PARAMETERS
 bTestPhase = False  # If true, a second result is given for validation.
 bEvalPhase = False  # If true, the test set is used.
 bUpsampling = False  # If true, upsampling is performed.
 bLexicons = False  # If true, the sentiment vocabulary uses external lexicons.
-bLemmatize = False  # If true, the data is lemmatized.
-bRemoveAccents = False
+bLemmatize = True  # If true, the data is lemmatized.
+bRemoveAccents = True
 bRemoveStopwords = False
-bLibreOffice = False
+bLibreOffice = True
 bReduced = False  # If true, NEU and NONE are treated as one category
 bOneVsRest = False
 bCountVectors = True
@@ -170,14 +172,12 @@ def perform_upsampling(dataframe):
     return df
 
 
-def libreoffice_processing(tokenized_data):
-    print("Libreoffice processing")
-    return [[word if dictionary.spell(word) is True else next(iter(dictionary.suggest(word)), word) for word in tweet] for tweet in tokenized_data]
+def libreoffice_processing(tokenized_sentence):
+    return [word if dictionary.spell(word) is True else next(iter(dictionary.suggest(word)), word) for word in tokenized_sentence]
 
 
-def tokenize_list(datalist):
-    print("Tokenizing")
-    return [nltk.word_tokenize(row) for row in datalist]
+def tokenize_sentence(sentence):
+    return nltk.word_tokenize(sentence)
 
 
 def remove_accents(tokenized_data):
@@ -195,9 +195,9 @@ def stem_list(datalist):
     return [[stemmer.stem(word) for word in row] for row in datalist]
 
 
-def lemmatize_list(datalist):
-    print("Lemmatizing data...")
-    return [[token.lemma_ for token in lemmatizer(row)] for row in datalist]
+def lemmatize_sentence(sentence):
+    data = utils.untokenize_sentence(sentence)
+    return [token.lemma_ for token in lemmatizer(data)]
 
 
 def perform_count_vectors(train_set, dev_set, print_oovs=False):
@@ -218,11 +218,13 @@ def perform_count_vectors(train_set, dev_set, print_oovs=False):
 
 
 def perform_tf_idf_vectors(train_set, dev_set):
+    train = [utils.untokenize_sentence(sentence) for sentence in train_set]
+    dev = [utils.untokenize_sentence(sentence) for sentence in dev_set]
     print("word level tf-idf")
     tfidf_vect = TfidfVectorizer(analyzer='word', token_pattern=r'\w{1,}', max_features=5000)
-    tfidf_vect.fit(train_set)
+    tfidf_vect.fit(train)
 
-    return tfidf_vect.transform(train_set), tfidf_vect.transform(dev_set)
+    return tfidf_vect.transform(train), tfidf_vect.transform(dev)
 
 
 def add_feature(matrix, new_features):
@@ -364,12 +366,13 @@ if __name__ == '__main__':
             valid_data['preprocessed'] = tweet_preprocessing.preprocess(valid_data['content'])
 
         # TOKENIZE
-        train_data['tokenized'] = tokenize_list(train_data['preprocessed'])
-        dev_data['tokenized'] = tokenize_list(dev_data['preprocessed'])
+        print("Tokenizing...")
+        train_data['tokenized'] = train_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.preprocessed), axis=1)
+        dev_data['tokenized'] = dev_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.preprocessed), axis=1)
         if bTestPhase is True:
-            test_data['tokenized'] = tokenize_list(test_data['preprocessed'])
+            test_data['tokenized'] = test_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.preprocessed), axis=1)
         if bEvalPhase is True:
-            valid_data['tokenized'] = tokenize_list(valid_data['preprocessed'])
+            valid_data['tokenized'] = valid_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.preprocessed), axis=1)
 
         train_data['final_data'] = train_data['tokenized']
         dev_data['final_data'] = dev_data['tokenized']
@@ -377,6 +380,24 @@ if __name__ == '__main__':
             test_data['final_data'] = test_data['tokenized']
         if bEvalPhase is True:
             valid_data['final_data'] = valid_data['tokenized']
+
+        if bLibreOffice:
+            print("LibreOffice Processing... ")
+            train_data['final_data'] = train_data.swifter.progress_bar(True).apply(lambda row: libreoffice_processing(row.final_data), axis=1)
+            dev_data['final_data'] = dev_data.swifter.apply(lambda row: libreoffice_processing(row.final_data), axis=1)
+            if bTestPhase is True:
+                test_data['final_data'] = test_data.swifter.apply(lambda row: libreoffice_processing(row.final_data), axis=1)
+            if bEvalPhase is True:
+                valid_data['final_data'] = valid_data.swifter.apply(lambda row: libreoffice_processing(row.final_data), axis=1)
+
+        if bLemmatize:
+            print("Lemmatizing data...")
+            train_data['final_data'] = train_data.swifter.apply(lambda row: lemmatize_sentence(row.final_data), axis=1)
+            dev_data['final_data'] = dev_data.swifter.apply(lambda row: lemmatize_sentence(row.final_data), axis=1)
+            if bTestPhase is True:
+                test_data['final_data'] = test_data.swifter.apply(lambda row: lemmatize_sentence(row.final_data), axis=1)
+            if bEvalPhase is True:
+                valid_data['final_data'] = valid_data.swifter.apply(lambda row: lemmatize_sentence(row.final_data), axis=1)
 
         if bRemoveAccents:
             train_data['final_data'] = remove_accents(train_data['final_data'])
@@ -393,23 +414,6 @@ if __name__ == '__main__':
                 test_data['final_data'] = remove_stopwords(test_data['final_data'])
             if bEvalPhase is True:
                 valid_data['final_data'] = remove_stopwords(valid_data['final_data'])
-
-        if bLibreOffice:
-            train_data['final_data'] = libreoffice_processing(train_data['final_data'])
-            dev_data['final_data'] = libreoffice_processing(dev_data['final_data'])
-            if bTestPhase is True:
-                test_data['final_data'] = libreoffice_processing(test_data['final_data'])
-            if bEvalPhase is True:
-                valid_data['final_data'] = libreoffice_processing(valid_data['final_data'])
-                # libreoffice_train_tweets = [row for row in libreoffice_processing(tokenized_train_content)]
-
-        if bLemmatize:
-            train_data['final_data'] = lemmatize_list(train_data['final_data'])
-            dev_data['final_data'] = lemmatize_list(dev_data['final_data'])
-            if bTestPhase is True:
-                test_data['final_data'] = lemmatize_list(test_data['final_data'])
-            if bEvalPhase is True:
-                valid_data['final_data'] = lemmatize_list(valid_data['final_data'])
 
         # # FEATURE EXTRACTION
         # train_data['tweet_length'] = extract_length_feature(tokenized_train_content)
@@ -452,7 +456,7 @@ if __name__ == '__main__':
 
         # COUNT VECTORS
         if bCountVectors:
-            train_count_vectors, dev_count_vectors  = perform_count_vectors(train_data['final_data'], dev_data['final_data'], True)
+            train_count_vectors, dev_count_vectors = perform_count_vectors(train_data['final_data'], dev_data['final_data'], True)
             if bTestPhase:
                 _, test_count_vectors = perform_count_vectors(train_data['final_data'], test_data['final_data'], True)
             if bEvalPhase:
@@ -460,13 +464,13 @@ if __name__ == '__main__':
 
         # TF-IDF VECTORS
         if bTfidf:
-            train_data['tfidf_vectors'], dev_data['tfidf_vectors'] = perform_tf_idf_vectors(train_data['final_data'],
+            train_tfidf, dev_tfidf = perform_tf_idf_vectors(train_data['final_data'],
                                                                                             dev_data['final_data'])
             if bTestPhase:
-                _, test_data['tfidf_vectors'] = perform_tf_idf_vectors(train_data['final_data'],
+                _, test_tfidf = perform_tf_idf_vectors(train_data['final_data'],
                                                                        test_data['final_data'])
             if bEvalPhase:
-                _, valid_data['tfidf_vectors'] = perform_tf_idf_vectors(train_data['final_data'],
+                _, valid_tfidf = perform_tf_idf_vectors(train_data['final_data'],
                                                                         valid_data['final_data'])
 
         # train_features = pd.DataFrame({
