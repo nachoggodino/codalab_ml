@@ -76,6 +76,7 @@ bReduced = False  # If true, NEU and NONE are treated as one category
 bOneVsRest = False
 bCountVectors = True
 bTfidf = False
+bClassicBow = True  # If true, bCountVectors must also be true
 
 print("Loading Hunspell directory")
 dictionary = hunspell.HunSpell('./dictionaries/es_ANY.dic', "./dictionaries/es_ANY.aff")  # In case you're using Hunspell
@@ -164,7 +165,7 @@ def get_sentiment_vocabulary(data, positive, negative):
 
 
 def perform_upsampling(dataframe):
-    ros = RandomOverSampler()
+    ros = RandomOverSampler(random_state=1234)
     x_resampled, y_resampled = ros.fit_resample(dataframe[['tweet_id', 'content']], dataframe['sentiment'])
     df = pd.DataFrame(data=x_resampled[0:, 0:], columns=['tweet_id', 'content'])
     df['sentiment'] = y_resampled
@@ -180,14 +181,13 @@ def tokenize_sentence(sentence):
     return nltk.word_tokenize(sentence)
 
 
-def remove_accents(tokenized_data):
-    print("Removing accents")
-    return [[unidecode.unidecode(word) for word in tweet] for tweet in tokenized_data]
+def remove_accents(tokenized_sentence):
+    return [unidecode.unidecode(word) for word in tokenized_sentence]
 
 
 def remove_stopwords(tokenized_data):
     print('Removing stopwords')
-    return [[word for word in row if word not in stopwords] for row in tokenized_data]
+    return [word for word in tokenized_data if word not in stopwords]
 
 
 def stem_list(datalist):
@@ -200,14 +200,14 @@ def lemmatize_sentence(sentence):
     return [token.lemma_ for token in lemmatizer(data)]
 
 
-def perform_count_vectors(train_set, dev_set, print_oovs=False):
+def perform_count_vectors(train_set, dev_set, print_oovs=False, classic_bow=False):
     train = [utils.untokenize_sentence(sentence) for sentence in train_set]
     dev = [utils.untokenize_sentence(sentence) for sentence in dev_set]
     print("Performing CountVectors")
-    count_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}')
+    count_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}', binary=classic_bow)
     count_vect.fit(train)
     if print_oovs:
-        dev_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}')
+        dev_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}', binary=classic_bow)
         dev_vect.fit(dev)
         oovs = [word for word in dev_vect.vocabulary_ if word not in count_vect.vocabulary_]
         print("Length of the vocabulary: {}".format(len(count_vect.vocabulary_)))
@@ -400,20 +400,21 @@ if __name__ == '__main__':
                 valid_data['final_data'] = valid_data.swifter.apply(lambda row: lemmatize_sentence(row.final_data), axis=1)
 
         if bRemoveAccents:
-            train_data['final_data'] = remove_accents(train_data['final_data'])
-            dev_data['final_data'] = remove_accents(dev_data['final_data'])
+            print("Removing accents...")
+            train_data['final_data'] = train_data.swifter.progress_bar(False).apply(lambda row: remove_accents(row.final_data), axis=1)
+            dev_data['final_data'] = dev_data.swifter.progress_bar(False).apply(lambda row: remove_accents(row.final_data), axis=1)
             if bTestPhase is True:
-                test_data['final_data'] = remove_accents(test_data['final_data'])
+                test_data['final_data'] = test_data.swifter.progress_bar(False).apply(lambda row: remove_accents(row.final_data), axis=1)
             if bEvalPhase is True:
-                valid_data['final_data'] = remove_accents(valid_data['final_data'])
+                valid_data['final_data'] = valid_data.swifter.progress_bar(False).apply(lambda row: remove_accents(row.final_data), axis=1)
 
         if bRemoveStopwords:
-            train_data['final_data'] = remove_stopwords(train_data['final_data'])
-            dev_data['final_data'] = remove_stopwords(dev_data['final_data'])
+            train_data['final_data'] = train_data.swifter.progress_bar(False).apply(lambda row: remove_stopwords(row.final_data), axis=1)
+            dev_data['final_data'] = dev_data.swifter.progress_bar(False).apply(lambda row: remove_stopwords(row.final_data), axis=1)
             if bTestPhase is True:
-                test_data['final_data'] = remove_stopwords(test_data['final_data'])
+                test_data['final_data'] = test_data.swifter.progress_bar(False).apply(lambda row: remove_stopwords(row.final_data), axis=1)
             if bEvalPhase is True:
-                valid_data['final_data'] = remove_stopwords(valid_data['final_data'])
+                valid_data['final_data'] = valid_data.swifter.progress_bar(False).apply(lambda row: remove_stopwords(row.final_data), axis=1)
 
         # # FEATURE EXTRACTION
         # train_data['tweet_length'] = extract_length_feature(tokenized_train_content)
@@ -456,11 +457,11 @@ if __name__ == '__main__':
 
         # COUNT VECTORS
         if bCountVectors:
-            train_count_vectors, dev_count_vectors = perform_count_vectors(train_data['final_data'], dev_data['final_data'], True)
+            train_count_vectors, dev_count_vectors = perform_count_vectors(train_data['final_data'], dev_data['final_data'], print_oovs=True, classic_bow=bClassicBow)
             if bTestPhase:
-                _, test_count_vectors = perform_count_vectors(train_data['final_data'], test_data['final_data'], True)
+                _, test_count_vectors = perform_count_vectors(train_data['final_data'], test_data['final_data'], print_oovs=True, classic_bow=bClassicBow)
             if bEvalPhase:
-                _, valid_count_vectors = perform_count_vectors(train_data['final_data'], valid_data['final_data'], True)
+                _, valid_count_vectors = perform_count_vectors(train_data['final_data'], valid_data['final_data'], print_oovs=True, classic_bow=bClassicBow)
 
         # TF-IDF VECTORS
         if bTfidf:
