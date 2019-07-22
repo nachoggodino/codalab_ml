@@ -19,7 +19,7 @@ import zipfile
 import warnings
 
 # Append script path to import path to locate tass_eval
-sys.path.append(os.path.realpath(__file__))
+# sys.path.append(os.path.realpath(__file__))
 
 # Import evalTask1 function fro tass_eval module
 # from tass_eval import evalTask1
@@ -38,6 +38,9 @@ from sklearn import decomposition, ensemble
 from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
 from sklearn.model_selection import KFold
 from gensim.models import Word2Vec
+
+import flair
+from flair.embeddings import WordEmbeddings, StackedEmbeddings, FlairEmbeddings, BertEmbeddings, ELMoEmbeddings, CharacterEmbeddings
 
 import pandas as pd, numpy, textblob, string
 import xgboost
@@ -63,26 +66,28 @@ warnings.filterwarnings('ignore')
 LANGUAGE_CODE = ['es', 'cr', 'mx', 'pe', 'uy']
 oovs_avg = 0
 
-# PARAMETERS
-bTestPhase = False  # If true, a second result is given for validation.
+# TODO PARAMETERS (Decide the Pipeline) ###############################################################################
+bTestPhase = True  # If true, a second result is given for validation.
 bEvalPhase = False  # If true, the test set is used.
 bUpsampling = False  # If true, upsampling is performed.
 bLexicons = False  # If true, the sentiment vocabulary uses external lexicons.
-bLemmatize = True  # If true, the data is lemmatized.
-bRemoveAccents = True
-bRemoveStopwords = False
-bLibreOffice = True
+bLemmatize = False  # If true, the data is lemmatized.
+bRemoveAccents = False  # If true, the accents are removed from the data
+bRemoveStopwords = False  # If true, stopwords are removed from the data
+bLibreOffice = False  # If true, words not in the libreoffice dictionary are corrected
 bReduced = False  # If true, NEU and NONE are treated as one category
-bOneVsRest = False
-bCountVectors = True
-bTfidf = False
-bClassicBow = True  # If true, bCountVectors must also be true
+bOneVsRest = False  # If true, the classifier uses a One vs All strategy
+bClassifVotingEnsemble = False  # If true, shows a result of an ensemble of all the selected classifiers (lr, nb, gb...)
+bCountVectors = True  # If true, count vectors are performed
+bTfidf = False  # If true, tf-idf vectors are performed
+bClassicBow = False  # If true, bCountVectors must also be true
+# TODO ################################################################################################################
 
 print("Loading Hunspell directory")
 dictionary = hunspell.HunSpell('./dictionaries/es_ANY.dic', "./dictionaries/es_ANY.aff")  # In case you're using Hunspell
 
 print("Loading Spacy Model")
-lemmatizer = spacy.load("es_core_news_sm")  # GLOBAL to avoid loading the model several times
+lemmatizer = spacy.load("es_core_news_md")  # GLOBAL to avoid loading the model several times
 
 print("Loading NLTK stuff")
 stemmer = nltk.stem.SnowballStemmer('spanish')
@@ -186,7 +191,6 @@ def remove_accents(tokenized_sentence):
 
 
 def remove_stopwords(tokenized_data):
-    print('Removing stopwords')
     return [word for word in tokenized_data if word not in stopwords]
 
 
@@ -204,7 +208,7 @@ def perform_count_vectors(train_set, dev_set, print_oovs=False, classic_bow=Fals
     train = [utils.untokenize_sentence(sentence) for sentence in train_set]
     dev = [utils.untokenize_sentence(sentence) for sentence in dev_set]
     print("Performing CountVectors")
-    count_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}', binary=classic_bow)
+    count_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}', binary=classic_bow, min_df=1)
     count_vect.fit(train)
     if print_oovs:
         dev_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}', binary=classic_bow)
@@ -299,21 +303,21 @@ def read_files(sLang, bStoreFiles=False):
     if bStoreFiles:
         train_data = utils.get_dataframe_from_xml(utils.parse_xml('./dataset/xml/intertass_{}_train.xml'.format(sLang)))
         dev_data = utils.get_dataframe_from_xml(utils.parse_xml('./dataset/xml/intertass_{}_dev.xml'.format(sLang)))
-        test_data = utils.get_dataframe_from_xml(utils.parse_xml('./dataset/xml/intertass_{}_test.xml'.format(sLang)))
 
         train_data.to_csv('./dataset/csv/intertass_{}_train.csv'.format(sLang), encoding='utf-8', sep='\t')
         dev_data.to_csv('./dataset/csv/intertass_{}_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
-        test_data.to_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), encoding='utf-8', sep='\t')
 
     else:
 
         train_data = pd.read_csv('./dataset/csv/intertass_{}_train.csv'.format(sLang), encoding='utf-8', sep='\t')
         dev_data = pd.read_csv('./dataset/csv/intertass_{}_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
-        test_data = pd.read_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), encoding='utf-8', sep='\t')
 
     valid_data = pd.read_csv('./dataset/csv/intertass_{}_valid.csv'.format(sLang), encoding='utf-8', sep='\t')
+    test_data = pd.read_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), encoding='utf-8', sep='\t')
+
     encoder = preprocessing.LabelEncoder()
     valid_data['sentiment'] = encoder.fit_transform(valid_data['sentiment'])
+    test_data['sentiment'] = encoder.transform(test_data['sentiment'])
 
     return train_data, dev_data, test_data, valid_data
 
@@ -530,7 +534,7 @@ if __name__ == '__main__':
 
 
         # TRAINING
-        # Choose the training, development and test sets
+        # TODO Choose the training, development and test sets #########################################################
         set_names_array = ['Count Vectors']
         training_set_array = [train_count_vectors]
         training_labels = train_data['sentiment']
@@ -544,6 +548,7 @@ if __name__ == '__main__':
         if bEvalPhase is True:
             valid_set_array = [valid_count_vectors]
             valid_labels = valid_data['sentiment']
+        # TODO #########################################################################################################
 
         # CLASSIFIERS
         lr = linear_model.LogisticRegression()
@@ -595,18 +600,19 @@ if __name__ == '__main__':
                 mini.append(probs)
                 print()
 
-            print("DEVELOPMENT VOTING ENSEMBLE")
-            print_confusion_matrix(get_averaged_predictions(mini), dev_labels)
-            print()
+            if bClassifVotingEnsemble:
+                print("DEVELOPMENT VOTING ENSEMBLE")
+                print_confusion_matrix(get_averaged_predictions(mini), dev_labels)
+                print()
 
-            if bEvalPhase:
-                print("VALIDATION VOTING ENSEMBLE")
-                print_confusion_matrix(get_averaged_predictions(mini_valid), valid_labels)
-                print()
-            if bTestPhase:
-                print("TEST VOTING ENSEMBLE")
-                print_confusion_matrix(get_averaged_predictions(mini_test), test_labels)
-                print()
+                if bEvalPhase:
+                    print("VALIDATION VOTING ENSEMBLE")
+                    print_confusion_matrix(get_averaged_predictions(mini_valid), valid_labels)
+                    print()
+                if bTestPhase:
+                    print("TEST VOTING ENSEMBLE")
+                    print_confusion_matrix(get_averaged_predictions(mini_test), test_labels)
+                    print()
 
             all_probabilities.append(mini)
             all_test_probabilities.append(mini_test)

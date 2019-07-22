@@ -6,6 +6,15 @@ import os
 import re
 import string
 import hunspell
+import flair
+from flair.embeddings import WordEmbeddings, FlairEmbeddings, DocumentRNNEmbeddings
+from flair.models import TextClassifier
+from flair.trainers import ModelTrainer
+from flair.data import Corpus
+from flair.datasets import ColumnCorpus
+from flair.data import Sentence
+
+from pathlib import Path
 
 # # from wikipedia2vec import Wikipedia2Vec
 #
@@ -51,39 +60,35 @@ import hunspell
 # print(classifier.predict('idiota'))
 
 
-# def camel_case_split(identifier):
-#     clean_identifier = re.sub('[#]', '', identifier)
-#     matches = re.finditer(".+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)", clean_identifier)
-#     return ' '.join([m.group(0) for m in matches])
-#
-#
-# emoji_pattern = re.compile("["
-#                            u"\U0001F600-\U0001F64F"  # emoticons
-#                            u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-#                            u"\U0001F680-\U0001F6FF"  # transport & map symbols
-#                            u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-#                            u"\U00002702-\U000027B0"
-#                            u"\U000024C2-\U0001F251"
-#                            "]+", flags=re.UNICODE)
-#
-# url_pattern = re.compile(".*http.*")
-#
-# clean_tweet = "@ToniThrowdown ahora tengo un dilema. Ayúdame Toni Y en 3DS porque me salió a 25 euros nuevo https://t.co/2bSRMWnrZ5"
-#
-# clean_tweet = clean_tweet.replace('\n', '').strip()
-# clean_tweet = " ".join([emoji_pattern.sub(r'EMOJI', word) for word in clean_tweet.split()])
-# clean_tweet = clean_tweet.replace(u'\u2018', "'").replace(u'\u2019', "'")
-# clean_tweet = re.sub(r"\B#\w+", lambda m: camel_case_split(m.group(0)), clean_tweet)
-# # clean_tweet = clean_tweet.lower()
-# clean_tweet = re.sub(r"http\S+", "HTTP", clean_tweet)
-# clean_tweet = re.sub(r"\B@\w+", 'USERNAME', clean_tweet)
-# clean_tweet = re.sub(r"(\w)(\1{2,})", r"\1", clean_tweet)
-# clean_tweet = re.sub(r"[a-zA-Z]*jaj[a-zA-Z]*", 'JAJAJA', clean_tweet)
-# clean_tweet = re.sub(r"\d+", '', clean_tweet)
-# # clean_tweet = clean_tweet.translate(str.maketrans('', '', string.punctuation + '¡'))
-#
-# print(clean_tweet)
+# for sLang in ['es', 'cr', 'mx', 'pe', 'uy']:
+#     test_data = utils.get_dataframe_from_xml(utils.parse_xml('./dataset/xml/intertass_{}_test.xml'.format(sLang)))
+#     labels = pd.read_csv('./tass_test_gold/{}.tsv'.format(sLang), sep='\t', header=None)
+#     labels.columns = ['tweet_id', 'sentiment']
+#     test_data['sentiment'] = labels.sentiment
+#     print(test_data.sentiment)
+#     print(test_data)
+#     test_data.to_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), sep='\t', encoding='utf-8')
 
+train_data = pd.read_csv('./dataset/csv/intertass_es_train.csv', encoding='utf-8', sep='\t')
+test_data = pd.read_csv('./dataset/csv/intertass_es_test.csv', encoding='utf-8', sep='\t')
+dev_data = pd.read_csv('./dataset/csv/intertass_es_dev.csv', encoding='utf-8', sep='\t')
 
+train_data['labels'] = '__label__' + train_data['sentiment'].astype(str)
+test_data['labels'] = '__label__' + test_data['sentiment'].astype(str)
+dev_data['labels'] = '__label__' + dev_data['sentiment'].astype(str)
 
+dev_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/train.csv', sep='\t', index=False, header=False)
+train_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/dev.csv', sep='\t', index=False, header=False)
+test_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/test.csv', sep='\t', index=False, header=False)
+
+columns = {1: 'content', 5: 'labels'}
+corpus: Corpus = ColumnCorpus('./dataset/flair', columns)
+
+word_embeddings = [WordEmbeddings('glove'), FlairEmbeddings('news-forward-fast'), FlairEmbeddings('news-backward-fast')]
+
+document_embeddings = DocumentRNNEmbeddings(word_embeddings, hidden_size=512, reproject_words=True, reproject_words_dimension=256,)
+classifier = TextClassifier(document_embeddings, label_dictionary=corpus.make_label_dictionary(), multi_label=True)
+
+trainer = ModelTrainer(classifier, corpus)
+trainer.train('./dataset/flair/', max_epochs=10)
 
