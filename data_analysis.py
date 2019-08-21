@@ -163,7 +163,6 @@ def libreoffice_processing(tokenized_data):
     return [[word if dictionary.spell(word) is True else next(iter(dictionary.suggest(word)), word) for word in tweet] for tweet in tokenized_data]
 
 
-
 def get_sentiment_vocabulary(data, positive, negative):
     pos_neg_tweets = []
     pos_neg_bool_labels = []

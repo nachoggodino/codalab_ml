@@ -7,7 +7,7 @@ import unidecode
 import spacy
 import hunspell
 import swifter
-
+from googletrans import Translator
 import utils
 import tweet_preprocessing
 
@@ -63,13 +63,14 @@ from textacy import keyterms
 import warnings
 warnings.filterwarnings('ignore')
 
-LANGUAGE_CODE = ['es', 'cr', 'mx', 'pe', 'uy']
+LANGUAGE_CODE = ['es', 'cr', 'mx', 'pe', 'uy', 'all']
 oovs_avg = 0
 
 # TODO PARAMETERS (Decide the Pipeline) ###############################################################################
 bTestPhase = True  # If true, a second result is given for validation.
 bEvalPhase = False  # If true, the test set is used.
 bUpsampling = False  # If true, upsampling is performed.
+bTwoWayTranslation = False  # If true, data is augmented using the two-way translation strategy. API Call problems
 bLexicons = False  # If true, the sentiment vocabulary uses external lexicons.
 bLemmatize = False  # If true, the data is lemmatized.
 bRemoveAccents = False  # If true, the accents are removed from the data
@@ -93,6 +94,8 @@ print("Loading NLTK stuff")
 stemmer = nltk.stem.SnowballStemmer('spanish')
 regex_uppercase = re.compile(r"\b[A-Z][A-Z]+\b")  # TODO
 stopwords = nltk.corpus.stopwords.words('spanish')
+
+translator = Translator()
 
 
 
@@ -178,6 +181,19 @@ def perform_upsampling(dataframe):
     return df
 
 
+def two_way_translation(data, sLang):
+    print("Data Augmentation: Performing Two-Way Translation")
+    result = []
+    returned = []
+    for tweet in data:
+        result.append(translator.translate(tweet, src='es', dest=sLang).text)
+    for tweet in result:
+        print('second-way')
+        returned.append(translator.translate(tweet, src=sLang, dest='es').text)
+    return returned
+    # return [translator.translate(translator.translate(tweet, src='es', dest=sLang).text, src=sLang, dest='es').text for tweet in data]
+
+
 def libreoffice_processing(tokenized_sentence):
     return [word if dictionary.spell(word) is True else next(iter(dictionary.suggest(word)), word) for word in tokenized_sentence]
 
@@ -208,12 +224,13 @@ def perform_count_vectors(train_set, dev_set, print_oovs=False, classic_bow=Fals
     train = [utils.untokenize_sentence(sentence) for sentence in train_set]
     dev = [utils.untokenize_sentence(sentence) for sentence in dev_set]
     print("Performing CountVectors")
-    count_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}', binary=classic_bow, min_df=1)
+    count_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}', binary=classic_bow, min_df=1, lowercase=False)
     count_vect.fit(train)
     if print_oovs:
         dev_vect = CountVectorizer(analyzer='word', token_pattern=r'\w{1,}', binary=classic_bow)
         dev_vect.fit(dev)
         oovs = [word for word in dev_vect.vocabulary_ if word not in count_vect.vocabulary_]
+        print(oovs)
         print("Length of the vocabulary: {}".format(len(count_vect.vocabulary_)))
         print("OOVS: {} ({}% of the tested vocabulary)".format(len(oovs), len(oovs)*100/len(dev_vect.vocabulary_)))
         print()
@@ -352,14 +369,31 @@ def fasttext_to_df(fasttext_format_path):
 
 if __name__ == '__main__':
 
+    all_train_data, all_dev_data, all_test_data, all_valid_data = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
     for sLang in LANGUAGE_CODE:
 
         print('** LANG: ' + sLang)
 
-        train_data, dev_data, test_data, valid_data = read_files(sLang, bStoreFiles=False)
+        if sLang == 'all':
+            train_data = all_train_data
+            dev_data = all_dev_data
+            test_data = all_test_data
+            valid_data = all_valid_data
+        else:
+            train_data, dev_data, test_data, valid_data = read_files(sLang, bStoreFiles=False)
+            all_train_data = pd.concat([all_train_data, train_data], ignore_index=True).reset_index(drop=True)
+            all_dev_data = pd.concat([all_dev_data, dev_data], ignore_index=True).reset_index(drop=True)
+            all_test_data = pd.concat([all_test_data, test_data], ignore_index=True).reset_index(drop=True)
+            all_valid_data = pd.concat([all_valid_data, valid_data], ignore_index=True).reset_index(drop=True)
 
         if bUpsampling:
             train_data = perform_upsampling(train_data)
+
+        if bTwoWayTranslation:
+            translated_data = train_data
+            translated_data['content'] = two_way_translation(translated_data.content, 'en')
+            train_data = pd.concat([train_data, translated_data], ignore_index=True).reset_index(drop=True)
 
         # PRE-PROCESSING
         train_data['preprocessed'] = tweet_preprocessing.preprocess(train_data['content'])
