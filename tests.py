@@ -72,23 +72,27 @@ from pathlib import Path
 train_data = pd.read_csv('./dataset/csv/intertass_es_train.csv', encoding='utf-8', sep='\t')
 test_data = pd.read_csv('./dataset/csv/intertass_es_test.csv', encoding='utf-8', sep='\t')
 dev_data = pd.read_csv('./dataset/csv/intertass_es_dev.csv', encoding='utf-8', sep='\t')
+#
 
-train_data['labels'] = '__label__' + train_data['sentiment'].astype(str)
-test_data['labels'] = '__label__' + test_data['sentiment'].astype(str)
-dev_data['labels'] = '__label__' + dev_data['sentiment'].astype(str)
+#
+# dev_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/train.csv', sep='\t', index=False, header=False)
+# train_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/dev.csv', sep='\t', index=False, header=False)
+# test_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/test.csv', sep='\t', index=False, header=False)
+#
+# columns = {1: 'content', 5: 'labels'}
+# corpus: Corpus = ColumnCorpus('./dataset/flair', columns)
+#
+# word_embeddings = [WordEmbeddings('glove'), FlairEmbeddings('news-forward-fast'), FlairEmbeddings('news-backward-fast')]
+#
+# document_embeddings = DocumentRNNEmbeddings(word_embeddings, hidden_size=512, reproject_words=True, reproject_words_dimension=256,)
+# classifier = TextClassifier(document_embeddings, label_dictionary=corpus.make_label_dictionary(), multi_label=True)
+#
+# trainer = ModelTrainer(classifier, corpus)
+# trainer.train('./dataset/flair/', max_epochs=10)
 
-dev_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/train.csv', sep='\t', index=False, header=False)
-train_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/dev.csv', sep='\t', index=False, header=False)
-test_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/test.csv', sep='\t', index=False, header=False)
+sLang = 'uy'
 
-columns = {1: 'content', 5: 'labels'}
-corpus: Corpus = ColumnCorpus('./dataset/flair', columns)
-
-word_embeddings = [WordEmbeddings('glove'), FlairEmbeddings('news-forward-fast'), FlairEmbeddings('news-backward-fast')]
-
-document_embeddings = DocumentRNNEmbeddings(word_embeddings, hidden_size=512, reproject_words=True, reproject_words_dimension=256,)
-classifier = TextClassifier(document_embeddings, label_dictionary=corpus.make_label_dictionary(), multi_label=True)
-
-trainer = ModelTrainer(classifier, corpus)
-trainer.train('./dataset/flair/', max_epochs=10)
+utils.csv_to_flair_format(train_data['content'], train_data['sentiment'], sLang, 'train')
+utils.csv_to_flair_format(dev_data['content'], dev_data['sentiment'], sLang, 'dev')
+utils.csv_to_flair_format(test_data['content'], test_data['sentiment'], sLang, 'test')
 

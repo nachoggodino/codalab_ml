@@ -375,17 +375,22 @@ if __name__ == '__main__':
 
         print('** LANG: ' + sLang)
 
-        if sLang == 'all':
+        if False and sLang == 'all':  # Not accesible by the moment
             train_data = all_train_data
             dev_data = all_dev_data
             test_data = all_test_data
             valid_data = all_valid_data
+            train_data.to_csv('./dataset/csv/intertass_all_train.csv', encoding='utf-8', sep='\t')
+            dev_data.to_csv('./dataset/csv/intertass_all_dev.csv', encoding='utf-8', sep='\t')
+            test_data.to_csv('./dataset/csv/intertass_all_test.csv', encoding='utf-8', sep='\t')
+            valid_data.to_csv('./dataset/csv/intertass_all_valid.csv', encoding='utf-8', sep='\t')
+
         else:
             train_data, dev_data, test_data, valid_data = read_files(sLang, bStoreFiles=False)
-            all_train_data = pd.concat([all_train_data, train_data], ignore_index=True).reset_index(drop=True)
-            all_dev_data = pd.concat([all_dev_data, dev_data], ignore_index=True).reset_index(drop=True)
-            all_test_data = pd.concat([all_test_data, test_data], ignore_index=True).reset_index(drop=True)
-            all_valid_data = pd.concat([all_valid_data, valid_data], ignore_index=True).reset_index(drop=True)
+            # all_train_data = pd.concat([all_train_data, train_data], ignore_index=True).reset_index(drop=True)
+            # all_dev_data = pd.concat([all_dev_data, dev_data], ignore_index=True).reset_index(drop=True)
+            # all_test_data = pd.concat([all_test_data, test_data], ignore_index=True).reset_index(drop=True)
+            # all_valid_data = pd.concat([all_valid_data, valid_data], ignore_index=True).reset_index(drop=True)
 
         if bUpsampling:
             train_data = perform_upsampling(train_data)

@@ -1,6 +1,7 @@
 import pandas
 from sklearn import preprocessing
 import xml.etree.ElementTree as ET
+import pandas as pd
 
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 
@@ -53,3 +54,41 @@ def get_dataframe_from_xml(data, encode_label=True):
 
 def untokenize_sentence(simple_list):
     return TreebankWordDetokenizer().detokenize(simple_list)
+
+
+def read_files(sLang, bStoreFiles=False):
+    train_data = pd.DataFrame()
+    dev_data = pd.DataFrame()
+    test_data = pd.DataFrame()
+    valid_data = pd.DataFrame()
+
+    if bStoreFiles:
+        train_data = get_dataframe_from_xml(parse_xml('./dataset/xml/intertass_{}_train.xml'.format(sLang)))
+        dev_data = get_dataframe_from_xml(parse_xml('./dataset/xml/intertass_{}_dev.xml'.format(sLang)))
+
+        train_data.to_csv('./dataset/csv/intertass_{}_train.csv'.format(sLang), encoding='utf-8', sep='\t')
+        dev_data.to_csv('./dataset/csv/intertass_{}_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
+
+    else:
+
+        train_data = pd.read_csv('./dataset/csv/intertass_{}_train.csv'.format(sLang), encoding='utf-8', sep='\t')
+        dev_data = pd.read_csv('./dataset/csv/intertass_{}_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
+
+    valid_data = pd.read_csv('./dataset/csv/intertass_{}_valid.csv'.format(sLang), encoding='utf-8', sep='\t')
+    test_data = pd.read_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), encoding='utf-8', sep='\t')
+
+    encoder = preprocessing.LabelEncoder()
+    valid_data['sentiment'] = encoder.fit_transform(valid_data['sentiment'])
+    test_data['sentiment'] = encoder.transform(test_data['sentiment'])
+
+    return train_data, dev_data, test_data, valid_data
+
+
+def csv_to_flair_format(data, labels, sLang, sPhase):
+    result = pandas.DataFrame()
+    result['labels'] = ['__label__' + str(label) for label in labels]
+    result['content'] = data
+    result.to_csv('dataset/flair/intertass_{}_{}.txt'.format(sLang, sPhase), header=None, index=None, sep=' ')
+    return
+
+

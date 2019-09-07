@@ -23,7 +23,7 @@ from imblearn.over_sampling import RandomOverSampler
 
 from collections import Counter
 
-LANGUAGE_CODE = 'es'
+LANGUAGE_CODE = 'uy'
 dictionary = hunspell.HunSpell('./dictionaries/es_ANY.dic', "./dictionaries/es_ANY.aff")
 
 emoji_pattern = re.compile("[" u"\U0001F600-\U0001F64F"  # emoticons
@@ -34,13 +34,13 @@ emoji_pattern = re.compile("[" u"\U0001F600-\U0001F64F"  # emoticons
          u"\U000024C2-\U0001F251"
          "]+", flags=re.UNICODE)
 
-data_path = "./codalab/DATASETS/public_data_development/"
+data_path = "./dataset/xml/"
 test_path = "./codalab/DATASETS/public_data_task1/"
 parser_dev = ET.XMLParser(encoding='utf-8')
 parser_train = ET.XMLParser(encoding='utf-8')
 
-tree_dev = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
-tree_train = ET.parse(data_path + LANGUAGE_CODE + "/intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
+tree_dev = ET.parse(data_path + "intertass_" + LANGUAGE_CODE + "_dev.xml", parser=parser_dev)
+tree_train = ET.parse(data_path + "intertass_" + LANGUAGE_CODE + "_train.xml", parser=parser_train)
 
 
 def get_dataframe_from_xml(data):
@@ -287,8 +287,7 @@ def print_separator(string_for_printing):
 train_data = get_dataframe_from_xml(tree_train)
 dev_data = get_dataframe_from_xml(tree_dev)
 
-train_data = perform_upsampling(train_data)
-print(train_data)
+# train_data = perform_upsampling(train_data)
 
 # TEXT PREPROCESSING
 processed_train_tweets = text_preprocessing(train_data['content'])

@@ -4,34 +4,7 @@ from sklearn import preprocessing
 import emoji
 import re
 import string
-
-
-def read_files(sLang, bStoreFiles=False):
-    train_data = pd.DataFrame()
-    dev_data = pd.DataFrame()
-    test_data = pd.DataFrame()
-    valid_data = pd.DataFrame()
-
-    if bStoreFiles:
-        train_data = utils.get_dataframe_from_xml(utils.parse_xml('./dataset/xml/intertass_{}_train.xml'.format(sLang)))
-        dev_data = utils.get_dataframe_from_xml(utils.parse_xml('./dataset/xml/intertass_{}_dev.xml'.format(sLang)))
-
-        train_data.to_csv('./dataset/csv/intertass_{}_train.csv'.format(sLang), encoding='utf-8', sep='\t')
-        dev_data.to_csv('./dataset/csv/intertass_{}_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
-
-    else:
-
-        train_data = pd.read_csv('./dataset/csv/intertass_{}_train.csv'.format(sLang), encoding='utf-8', sep='\t')
-        dev_data = pd.read_csv('./dataset/csv/intertass_{}_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
-
-    valid_data = pd.read_csv('./dataset/csv/intertass_{}_valid.csv'.format(sLang), encoding='utf-8', sep='\t')
-    test_data = pd.read_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), encoding='utf-8', sep='\t')
-
-    encoder = preprocessing.LabelEncoder()
-    valid_data['sentiment'] = encoder.fit_transform(valid_data['sentiment'])
-    test_data['sentiment'] = encoder.transform(test_data['sentiment'])
-
-    return train_data, dev_data, test_data, valid_data
+from collections import Counter
 
 
 def preprocess(data):
@@ -66,7 +39,7 @@ def preprocess(data):
 
 def print_preprocess(data):
     hashtags, urls, usernames, letReps, laughters, numbers, emojis = list(), list(), list(), list(), list(), list(), list()
-    qque, xpor, dde = list(), list(), list()
+    qque, xpor, dde, xqs, pqs = list(), list(), list(), list(), list()
     for tweet in data:
         clean_tweet = tweet
 
@@ -87,29 +60,55 @@ def print_preprocess(data):
         numbers.extend(re.findall(r"\d+", clean_tweet))  # URL
         qque.extend(re.findall(r"\b(q)\b", clean_tweet, re.IGNORECASE))  # q = que
         xpor.extend(re.findall(r"\b(x)\b", clean_tweet, re.IGNORECASE))  # x = por
-        dde.extend(re.findall(r"\b(d)\b", clean_tweet, re.IGNORECASE)) # d = de
+        dde.extend(re.findall(r"\b(d)\b", clean_tweet, re.IGNORECASE))  # d = de
+        xqs.extend(re.findall(r"\b(xq)\b", clean_tweet, re.IGNORECASE))  # xq = porque
+        pqs.extend(re.findall(r"\b(pq)\b", clean_tweet, re.IGNORECASE))  # pq = porque
         # clean_tweet = clean_tweet.translate(str.maketrans('', '', string.punctuation + '¡'))  # PUNCTUATION
 
-        # q=que, x=por, d=de, to=todos, xd,
-    return hashtags, urls, usernames, letReps, laughters, numbers, emojis, xpor, qque, dde
+
+    return hashtags, urls, usernames, letReps, laughters, numbers, emojis, xpor, qque, dde, xqs, pqs
 
 
 
 sc = {'¡', '!', '?', '¿'}
 punctuation = ''.join([c for c in string.punctuation if c not in sc])
 
-train_data, dev_data, test_data, valid_data = read_files('es')
-hashtags, urls, usernames, letReps, laughters, numbers,emojis, xpor, qque, dde = print_preprocess(train_data['content'])
+train_data, dev_data, test_data, valid_data = utils.read_files('all')
+hashtags, urls, usernames, letReps, laughters, numbers,emojis, xpor, qque, dde, xqs, pqs = print_preprocess(dev_data['content'])
+
+print("Occurrences: \n")
+
 print(len(hashtags))
 print(len(urls))
 print(len(usernames))
 print(len(letReps))
 print(len(laughters))
 print(len(numbers))
-print(emojis)
+print(len(emojis))
 print(len(xpor))
 print(len(qque))
 print(len(dde))
+print(len(xqs))
+print(len(pqs))
+
+print("\n\nSingle Occurrence:\n")
+
+print(len(list(dict.fromkeys(hashtags))))
+print(len(list(dict.fromkeys(urls))))
+print(len(list(dict.fromkeys(usernames))))
+print(len(list(dict.fromkeys(letReps))))
+print(len(list(dict.fromkeys(laughters))))
+print(len(list(dict.fromkeys(numbers))))
+print(len(list(dict.fromkeys(emojis))))
+
+print("\n\nCounters: \n")
+
+print(Counter(hashtags).most_common(5))
+print(Counter(usernames).most_common(5))
+print(Counter(numbers).most_common(5))
+print(Counter(emojis).most_common(5))
+
+
 
 
 
