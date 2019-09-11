@@ -2,6 +2,8 @@ import pandas
 from sklearn import preprocessing
 import xml.etree.ElementTree as ET
 import pandas as pd
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+import tweet_preprocessing
 
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 
@@ -84,11 +86,55 @@ def read_files(sLang, bStoreFiles=False):
     return train_data, dev_data, test_data, valid_data
 
 
-def csv_to_flair_format(data, labels, sLang, sPhase):
+def csv_to_flair_format(preprocess=False):
+    for sLang in ['es', 'cr', 'mx', 'pe', 'uy', 'all']:
+        train_data = pd.read_csv('./dataset/csv/intertass_{}_train.csv'.format(sLang), encoding='utf-8', sep='\t')
+        test_data = pd.read_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), encoding='utf-8', sep='\t')
+        dev_data = pd.read_csv('./dataset/csv/intertass_{}_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
+
+        encoder = preprocessing.LabelEncoder()
+        test_data['sentiment'] = encoder.fit_transform(test_data['sentiment'])
+
+        if preprocess:
+            train_data['content'] = tweet_preprocessing.preprocess(train_data['content'])
+            dev_data['content'] = tweet_preprocessing.preprocess(dev_data['content'])
+            test_data['content'] = tweet_preprocessing.preprocess(test_data['content'])
+
+        csv2flair(train_data['content'], train_data['sentiment'], sLang, 'train')
+        csv2flair(dev_data['content'], dev_data['sentiment'], sLang, 'dev')
+        csv2flair(test_data['content'], test_data['sentiment'], sLang, 'test')
+
+
+def encode_label(list_of_labels):
+    encoder = preprocessing.LabelEncoder()
+    return encoder.fit_transform(list_of_labels)
+
+
+def print_confusion_matrix(predictions, labels, print_confusion_matrix=False, print_prec_and_rec=False):
+    preds = pd.Series(predictions, name='Predicted')
+    labs = pd.Series(labels, name='Actual')
+    df_confusion = pd.crosstab(labs, preds)
+    if print_confusion_matrix:
+        print(df_confusion)
+    prec = precision_score(labs, preds, average='macro')
+    rec = recall_score(labs, preds, average='macro')
+    score = 2*(prec*rec)/(prec+rec)
+    print("F1-SCORE: " + str(score))
+    if print_prec_and_rec:
+        print("Recall: " + str(rec))
+        print("Precision: " + str(prec))
+    print()
+    return
+
+
+# AUXILIAR
+def csv2flair(data, labels, sLang, sPhase):
     result = pandas.DataFrame()
     result['labels'] = ['__label__' + str(label) for label in labels]
     result['content'] = data
     result.to_csv('dataset/flair/intertass_{}_{}.txt'.format(sLang, sPhase), header=None, index=None, sep=' ')
     return
+
+
 
 

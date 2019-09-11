@@ -9,6 +9,7 @@ import hunspell
 import swifter
 from googletrans import Translator
 import utils
+from utils import print_confusion_matrix
 import tweet_preprocessing
 
 from scipy.sparse import coo_matrix, hstack
@@ -280,21 +281,6 @@ def get_predictions(trained_classifier, feature_test_vector, is_vso=False):
 
 def get_model_accuracy(predictions, validation_labels):
     return metrics.accuracy_score(predictions, validation_labels)
-
-
-def print_confusion_matrix(predictions, labels):
-    preds = pd.Series(predictions, name='Predicted')
-    labs = pd.Series(labels, name='Actual')
-    df_confusion = pd.crosstab(labs, preds)
-    # print(df_confusion)
-    prec = precision_score(labs, preds, average='macro')
-    rec = recall_score(labs, preds, average='macro')
-    score = 2*(prec*rec)/(prec+rec)
-    print("F1-SCORE: " + str(score))
-    # print("Recall: " + str(rec))
-    # print("Precision: " + str(prec))
-    print()
-    return
 
 
 def get_averaged_predictions(predictions_array):

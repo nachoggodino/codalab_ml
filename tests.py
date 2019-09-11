@@ -1,7 +1,7 @@
 from gensim.models import KeyedVectors
 import pandas as pd
 import utils
-from sklearn import svm
+from sklearn import svm, preprocessing
 import os
 import re
 import string
@@ -13,6 +13,7 @@ from flair.trainers import ModelTrainer
 from flair.data import Corpus
 from flair.datasets import ColumnCorpus
 from flair.data import Sentence
+from tweet_preprocessing import preprocess
 
 from pathlib import Path
 
@@ -69,30 +70,18 @@ from pathlib import Path
 #     print(test_data)
 #     test_data.to_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), sep='\t', encoding='utf-8')
 
-train_data = pd.read_csv('./dataset/csv/intertass_es_train.csv', encoding='utf-8', sep='\t')
-test_data = pd.read_csv('./dataset/csv/intertass_es_test.csv', encoding='utf-8', sep='\t')
-dev_data = pd.read_csv('./dataset/csv/intertass_es_dev.csv', encoding='utf-8', sep='\t')
-#
+_, _, test_data, _ = utils.read_files('es')
 
-#
-# dev_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/train.csv', sep='\t', index=False, header=False)
-# train_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/dev.csv', sep='\t', index=False, header=False)
-# test_data.filter(['content', 'labels'], axis=1).to_csv('./dataset/flair/test.csv', sep='\t', index=False, header=False)
-#
-# columns = {1: 'content', 5: 'labels'}
-# corpus: Corpus = ColumnCorpus('./dataset/flair', columns)
-#
-# word_embeddings = [WordEmbeddings('glove'), FlairEmbeddings('news-forward-fast'), FlairEmbeddings('news-backward-fast')]
-#
-# document_embeddings = DocumentRNNEmbeddings(word_embeddings, hidden_size=512, reproject_words=True, reproject_words_dimension=256,)
-# classifier = TextClassifier(document_embeddings, label_dictionary=corpus.make_label_dictionary(), multi_label=True)
-#
-# trainer = ModelTrainer(classifier, corpus)
-# trainer.train('./dataset/flair/', max_epochs=10)
+classifier = TextClassifier.load('./resources/results_flair/training2/best-model.pt')
+data = preprocess(test_data['content'])
 
-sLang = 'uy'
+sentences = [Sentence(tweet) for tweet in data]
+result = classifier.predict(sentences)
+predictions = [int(sentence.labels[0].value) for sentence in result]
+utils.print_confusion_matrix(predictions, utils.encode_label(test_data['sentiment']))
+print(result)
 
-utils.csv_to_flair_format(train_data['content'], train_data['sentiment'], sLang, 'train')
-utils.csv_to_flair_format(dev_data['content'], dev_data['sentiment'], sLang, 'dev')
-utils.csv_to_flair_format(test_data['content'], test_data['sentiment'], sLang, 'test')
+# sentence = Sentence("Hey! que tal estamos tio!!")
+# result = classifier.predict(sentence)
+# print(result[0].labels[0].value)
 
