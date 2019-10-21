@@ -4,8 +4,13 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
 import tweet_preprocessing
+import hunspell
+import swifter
 
 from nltk.tokenize.treebank import TreebankWordDetokenizer
+import nltk
+
+from imblearn.over_sampling import RandomOverSampler
 
 
 def parse_xml(filepath):
@@ -86,11 +91,13 @@ def read_files(sLang, bStoreFiles=False):
     return train_data, dev_data, test_data, valid_data
 
 
-def csv_to_flair_format(preprocess=False):
+def csv_to_flair_format(preprocess=False, postpreprocess=False):
     for sLang in ['es', 'cr', 'mx', 'pe', 'uy', 'all']:
         train_data = pd.read_csv('./dataset/csv/intertass_{}_train.csv'.format(sLang), encoding='utf-8', sep='\t')
         test_data = pd.read_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), encoding='utf-8', sep='\t')
         dev_data = pd.read_csv('./dataset/csv/intertass_{}_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
+
+        train_data = perform_upsampling(train_data)
 
         encoder = preprocessing.LabelEncoder()
         test_data['sentiment'] = encoder.fit_transform(test_data['sentiment'])
@@ -99,6 +106,15 @@ def csv_to_flair_format(preprocess=False):
             train_data['content'] = tweet_preprocessing.preprocess(train_data['content'])
             dev_data['content'] = tweet_preprocessing.preprocess(dev_data['content'])
             test_data['content'] = tweet_preprocessing.preprocess(test_data['content'])
+
+        if postpreprocess:
+            dictionary = hunspell.HunSpell('./dictionaries/es_ANY.dic', "./dictionaries/es_ANY.aff")
+            train_data['content'] = train_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.content), axis=1)
+            dev_data['content'] = dev_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.content), axis=1)
+            test_data['content'] = test_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.content), axis=1)
+            train_data['content'] = train_data.swifter.progress_bar(True).apply(lambda row: libreoffice_processing(row.content, dictionary), axis=1)
+            dev_data['content'] = dev_data.swifter.apply(lambda row: libreoffice_processing(row.content, dictionary), axis=1)
+            test_data['content'] = test_data.swifter.apply(lambda row: libreoffice_processing(row.content, dictionary), axis=1)
 
         csv2flair(train_data['content'], train_data['sentiment'], sLang, 'train')
         csv2flair(dev_data['content'], dev_data['sentiment'], sLang, 'dev')
@@ -125,6 +141,23 @@ def print_confusion_matrix(predictions, labels, print_confusion_matrix=False, pr
         print("Precision: " + str(prec))
     print()
     return
+
+
+def libreoffice_processing(tokenized_sentence, dictionary):
+    return [word if dictionary.spell(word) is True else next(iter(dictionary.suggest(word)), word) for word in tokenized_sentence]
+
+
+def tokenize_sentence(sentence):
+    return nltk.word_tokenize(sentence)
+
+
+def perform_upsampling(dataframe):
+    ros = RandomOverSampler(random_state=1234)
+    x_resampled, y_resampled = ros.fit_resample(dataframe[['tweet_id', 'content']], dataframe['sentiment'])
+    df = pd.DataFrame(data=x_resampled[0:, 0:], columns=['tweet_id', 'content'])
+    df['sentiment'] = y_resampled
+    df = df.sample(frac=1).reset_index(drop=True)
+    return df
 
 
 # AUXILIAR

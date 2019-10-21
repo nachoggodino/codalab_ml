@@ -70,18 +70,20 @@ from pathlib import Path
 #     print(test_data)
 #     test_data.to_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), sep='\t', encoding='utf-8')
 
-_, _, test_data, _ = utils.read_files('es')
+# utils.csv_to_flair_format(preprocess=True, postpreprocess=True)
 
-classifier = TextClassifier.load('./resources/results_flair/training2/best-model.pt')
+_, _, test_data, _ = utils.read_files('all')
+
+
+classifier = TextClassifier.load('./resources/results_flair/test1/best-model.pt')
 data = preprocess(test_data['content'])
 
 sentences = [Sentence(tweet) for tweet in data]
+print(sentences)
 result = classifier.predict(sentences)
+print(result[60])
 predictions = [int(sentence.labels[0].value) for sentence in result]
+print(predictions)
 utils.print_confusion_matrix(predictions, utils.encode_label(test_data['sentiment']))
 print(result)
-
-# sentence = Sentence("Hey! que tal estamos tio!!")
-# result = classifier.predict(sentence)
-# print(result[0].labels[0].value)
 

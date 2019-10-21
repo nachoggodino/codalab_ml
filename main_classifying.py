@@ -173,13 +173,7 @@ def get_sentiment_vocabulary(data, positive, negative):
         return positive_vocabulary, negative_vocabulary
 
 
-def perform_upsampling(dataframe):
-    ros = RandomOverSampler(random_state=1234)
-    x_resampled, y_resampled = ros.fit_resample(dataframe[['tweet_id', 'content']], dataframe['sentiment'])
-    df = pd.DataFrame(data=x_resampled[0:, 0:], columns=['tweet_id', 'content'])
-    df['sentiment'] = y_resampled
-    df = df.sample(frac=1).reset_index(drop=True)
-    return df
+
 
 
 def two_way_translation(data, sLang):
@@ -195,12 +189,10 @@ def two_way_translation(data, sLang):
     # return [translator.translate(translator.translate(tweet, src='es', dest=sLang).text, src=sLang, dest='es').text for tweet in data]
 
 
-def libreoffice_processing(tokenized_sentence):
-    return [word if dictionary.spell(word) is True else next(iter(dictionary.suggest(word)), word) for word in tokenized_sentence]
 
 
-def tokenize_sentence(sentence):
-    return nltk.word_tokenize(sentence)
+
+
 
 
 def remove_accents(tokenized_sentence):
@@ -379,7 +371,7 @@ if __name__ == '__main__':
             # all_valid_data = pd.concat([all_valid_data, valid_data], ignore_index=True).reset_index(drop=True)
 
         if bUpsampling:
-            train_data = perform_upsampling(train_data)
+            train_data = utils.perform_upsampling(train_data)
 
         if bTwoWayTranslation:
             translated_data = train_data
@@ -396,12 +388,12 @@ if __name__ == '__main__':
 
         # TOKENIZE
         print("Tokenizing...")
-        train_data['tokenized'] = train_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.preprocessed), axis=1)
-        dev_data['tokenized'] = dev_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.preprocessed), axis=1)
+        train_data['tokenized'] = train_data.swifter.progress_bar(False).apply(lambda row: utils.tokenize_sentence(row.preprocessed), axis=1)
+        dev_data['tokenized'] = dev_data.swifter.progress_bar(False).apply(lambda row: utils.tokenize_sentence(row.preprocessed), axis=1)
         if bTestPhase is True:
-            test_data['tokenized'] = test_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.preprocessed), axis=1)
+            test_data['tokenized'] = test_data.swifter.progress_bar(False).apply(lambda row: utils.tokenize_sentence(row.preprocessed), axis=1)
         if bEvalPhase is True:
-            valid_data['tokenized'] = valid_data.swifter.progress_bar(False).apply(lambda row: tokenize_sentence(row.preprocessed), axis=1)
+            valid_data['tokenized'] = valid_data.swifter.progress_bar(False).apply(lambda row: utils.tokenize_sentence(row.preprocessed), axis=1)
 
         train_data['final_data'] = train_data['tokenized']
         dev_data['final_data'] = dev_data['tokenized']
@@ -412,12 +404,12 @@ if __name__ == '__main__':
 
         if bLibreOffice:
             print("LibreOffice Processing... ")
-            train_data['final_data'] = train_data.swifter.progress_bar(True).apply(lambda row: libreoffice_processing(row.final_data), axis=1)
-            dev_data['final_data'] = dev_data.swifter.apply(lambda row: libreoffice_processing(row.final_data), axis=1)
+            train_data['final_data'] = train_data.swifter.progress_bar(True).apply(lambda row: utils.libreoffice_processing(row.final_data, dictionary), axis=1)
+            dev_data['final_data'] = dev_data.swifter.apply(lambda row: utils.libreoffice_processing(row.final_data, dictionary), axis=1)
             if bTestPhase is True:
-                test_data['final_data'] = test_data.swifter.apply(lambda row: libreoffice_processing(row.final_data), axis=1)
+                test_data['final_data'] = test_data.swifter.apply(lambda row: utils.libreoffice_processing(row.final_data, dictionary), axis=1)
             if bEvalPhase is True:
-                valid_data['final_data'] = valid_data.swifter.apply(lambda row: libreoffice_processing(row.final_data), axis=1)
+                valid_data['final_data'] = valid_data.swifter.apply(lambda row: utils.libreoffice_processing(row.final_data, dictionary), axis=1)
 
         if bLemmatize:
             print("Lemmatizing data...")
@@ -700,37 +692,37 @@ if __name__ == '__main__':
         # print()
         #
 
-        # print('-------------- FINAL ENSEMBLE --------------')
-        # print()
-        #
-        # print('From Normal Models:')
-        # print()
-        #
-        # selected_classifier = 0  # See all the classifiers available above.
-        #
-        # probabilities_for_voting_ensemble_dev = [
-        #     all_probabilities[0][selected_classifier],
-        #     all_probabilities[1][selected_classifier]
-        # ]
-        #
-        # if bTestPhase:
-        #     probabilities_for_voting_ensemble_test = [
-        #         all_test_probabilities[0][selected_classifier],
-        #         all_test_probabilities[1][selected_classifier]
-        #     ]
-        #
-        # if bEvalPhase:
-        #     probabilities_for_voting_ensemble_valid = [
-        #         all_valid_probabilities[0][selected_classifier],
-        #         all_valid_probabilities[1][selected_classifier]
-        #     ]
-        #
-        # print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_dev))
-        # if bEvalPhase:
-        #     print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_valid))
-        # if bTestPhase:
-        #     print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_valid))
-        # print()
+        print('-------------- FINAL ENSEMBLE --------------')
+        print()
+
+        print('From Normal Models:')
+        print()
+
+        selected_classifier = 0  # See all the classifiers available above.
+
+        probabilities_for_voting_ensemble_dev = [
+            all_probabilities[0][selected_classifier],
+            all_probabilities[1][selected_classifier]
+        ]
+
+        if bTestPhase:
+            probabilities_for_voting_ensemble_test = [
+                all_test_probabilities[0][selected_classifier],
+                all_test_probabilities[1][selected_classifier]
+            ]
+
+        if bEvalPhase:
+            probabilities_for_voting_ensemble_valid = [
+                all_valid_probabilities[0][selected_classifier],
+                all_valid_probabilities[1][selected_classifier]
+            ]
+
+        print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_dev))
+        if bEvalPhase:
+            print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_valid))
+        if bTestPhase:
+            print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_valid))
+        print()
 
         print()
         print('--------------- NEXT LANGUAGE ------------------')

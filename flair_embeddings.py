@@ -9,7 +9,8 @@ from pathlib import Path
 from flair.hyperparameter.param_selection import TextClassifierParamSelector, OptimizationValue
 from hyperopt import hp
 from flair.hyperparameter.param_selection import SearchSpace, Parameter
-from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, FlairEmbeddings, BertEmbeddings, ELMoEmbeddings, BytePairEmbeddings
+from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, FlairEmbeddings, BertEmbeddings, \
+    ELMoEmbeddings, FastTextEmbeddings, BytePairEmbeddings
 from flair.training_utils import EvaluationMetric
 
 import utils
@@ -19,9 +20,9 @@ from flair.data import Sentence
 
 if __name__ == '__main__':
 
-    # utils.csv_to_flair_format(preprocess=True)
+    utils.csv_to_flair_format(preprocess=True, postpreprocess=False)
 
-    sLang = 'es'
+    sLang = 'all'
 
     corpus = Corpus = ClassificationCorpus('./dataset/flair/', train_file='intertass_{}_train.txt'.format(sLang),
                                            dev_file='intertass_{}_dev.txt'.format(sLang),
@@ -29,10 +30,13 @@ if __name__ == '__main__':
 
     search_space = SearchSpace()
 
+
     word_embeddings = [
-        [BertEmbeddings('bert-base-multilingual-cased')],
-        [FlairEmbeddings('spanish-forward-fast'), FlairEmbeddings('spanish-backward-fast'), BertEmbeddings('bert-base-multilingual-cased')],
-        [FlairEmbeddings('spanish-forward-fast'), FlairEmbeddings('spanish-backward-fast')]
+        # BertEmbeddings('bert-base-multilingual-cased')
+        BytePairEmbeddings(language='es')
+        # FlairEmbeddings('spanish-forward-fast'), FlairEmbeddings('spanish-backward-fast'), BertEmbeddings('bert-base-multilingual-cased')
+        # FlairEmbeddings('spanish-forward-fast'), FlairEmbeddings('spanish-backward-fast')
+        # FastTextEmbeddings('embeddings/wiki.es.vec')
     ]
 
     search_space.add(Parameter.EMBEDDINGS, hp.choice, options=word_embeddings)
@@ -54,11 +58,15 @@ if __name__ == '__main__':
         optimization_value=OptimizationValue.DEV_SCORE,
         evaluation_metric=EvaluationMetric.MACRO_F1_SCORE
     )
-    param_selector.optimize(search_space, max_evals=2)
+    # param_selector.optimize(search_space, max_evals=2)
 
-    # document_embeddings = DocumentRNNEmbeddings(word_embeddings, hidden_size=512, reproject_words=True, rnn_type='LSTM',
-    #                                             reproject_words_dimension=256, bidirectional=True)
-    # classifier = TextClassifier(document_embeddings, label_dictionary=corpus.make_label_dictionary(), multi_label=False)
-    # trainer = ModelTrainer(classifier, corpus)
-    # trainer.train('./resources/results_flair/training2/', max_epochs=10, mini_batch_size=32, anneal_factor=0.3,
-    #               learning_rate=0.05, patience=1)
+    document_embeddings = DocumentRNNEmbeddings(word_embeddings, hidden_size=512, reproject_words=True, rnn_type='LSTM',
+                                                reproject_words_dimension=256)
+    classifier = TextClassifier(document_embeddings, label_dictionary=corpus.make_label_dictionary(), multi_label=False)
+    trainer = ModelTrainer(classifier, corpus)
+    trainer.train('./resources/results_flair/test1/', max_epochs=10, mini_batch_size=16, anneal_factor=0.5,
+                  learning_rate=0.1, patience=1, monitor_train=True, monitor_test=True)
+
+    trainer.final_test(Path('resources/results_flairs'), 32)
+
+    trainer.find_learning_rate('./resources/lr/lr1.tsv')
