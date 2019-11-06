@@ -64,15 +64,15 @@ from textacy import keyterms
 import warnings
 warnings.filterwarnings('ignore')
 
-LANGUAGE_CODE = ['es', 'cr', 'mx', 'pe', 'uy', 'all']
+LANGUAGE_CODE = ['es', 'cr', 'mx', 'pe', 'uy']
 oovs_avg = 0
 
 # TODO PARAMETERS (Decide the Pipeline) ###############################################################################
 bTestPhase = True  # If true, a second result is given for validation.
 bEvalPhase = False  # If true, the test set is used.
-bUpsampling = False  # If true, upsampling is performed.
+bUpsampling = True  # If true, upsampling is performed.
 bTwoWayTranslation = False  # If true, data is augmented using the two-way translation strategy. API Call problems
-bLexicons = False  # If true, the sentiment vocabulary uses external lexicons.
+bLexicons = True  # If true, the sentiment vocabulary uses external lexicons.
 bLemmatize = False  # If true, the data is lemmatized.
 bRemoveAccents = False  # If true, the accents are removed from the data
 bRemoveStopwords = False  # If true, stopwords are removed from the data
@@ -80,7 +80,7 @@ bLibreOffice = False  # If true, words not in the libreoffice dictionary are cor
 bReduced = False  # If true, NEU and NONE are treated as one category
 bOneVsRest = False  # If true, the classifier uses a One vs All strategy
 bClassifVotingEnsemble = False  # If true, shows a result of an ensemble of all the selected classifiers (lr, nb, gb...)
-bCountVectors = True  # If true, count vectors are performed
+bCountVectors = False  # If true, count vectors are performed
 bTfidf = False  # If true, tf-idf vectors are performed
 bClassicBow = False  # If true, bCountVectors must also be true
 # TODO ################################################################################################################
@@ -102,9 +102,9 @@ translator = Translator()
 
 
 
-def extract_length_feature(tokenized_dataframe):
+def extract_length_feature(sentences_list):
     print("Extracting length feature")
-    return [len(tweet) for tweet in tokenized_dataframe]
+    return [len(tweet.split(' ')) for tweet in sentences_list]
 
 
 def extract_uppercase_feature(dataframe):
@@ -173,9 +173,6 @@ def get_sentiment_vocabulary(data, positive, negative):
         return positive_vocabulary, negative_vocabulary
 
 
-
-
-
 def two_way_translation(data, sLang):
     print("Data Augmentation: Performing Two-Way Translation")
     result = []
@@ -187,12 +184,6 @@ def two_way_translation(data, sLang):
         returned.append(translator.translate(tweet, src=sLang, dest='es').text)
     return returned
     # return [translator.translate(translator.translate(tweet, src='es', dest=sLang).text, src=sLang, dest='es').text for tweet in data]
-
-
-
-
-
-
 
 
 def remove_accents(tokenized_sentence):
@@ -379,12 +370,12 @@ if __name__ == '__main__':
             train_data = pd.concat([train_data, translated_data], ignore_index=True).reset_index(drop=True)
 
         # PRE-PROCESSING
-        train_data['preprocessed'] = tweet_preprocessing.preprocess(train_data['content'])
-        dev_data['preprocessed'] = tweet_preprocessing.preprocess(dev_data['content'])
+        train_data['preprocessed'] = tweet_preprocessing.preprocess(train_data['content'], bAll=True)
+        dev_data['preprocessed'] = tweet_preprocessing.preprocess(dev_data['content'], bAll=True)
         if bTestPhase is True:
-            test_data['preprocessed'] = tweet_preprocessing.preprocess(test_data['content'])
+            test_data['preprocessed'] = tweet_preprocessing.preprocess(test_data['content'], bAll=True)
         if bEvalPhase is True:
-            valid_data['preprocessed'] = tweet_preprocessing.preprocess(valid_data['content'])
+            valid_data['preprocessed'] = tweet_preprocessing.preprocess(valid_data['content'], bAll=True)
 
         # TOKENIZE
         print("Tokenizing...")
@@ -437,44 +428,44 @@ if __name__ == '__main__':
             if bEvalPhase is True:
                 valid_data['final_data'] = valid_data.swifter.progress_bar(False).apply(lambda row: remove_stopwords(row.final_data), axis=1)
 
-        # # FEATURE EXTRACTION
-        # train_data['tweet_length'] = extract_length_feature(tokenized_train_content)
-        # train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
-        # train_data['question_mark'] = extract_question_mark_feature(train_data['content'])
-        # train_data['exclamation_mark'] = extract_exclamation_mark_feature(train_data['content'])
-        # train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
-        # train_data['hashtag_number'] = extract_hashtag_number_feature(train_data['content'])
-        # train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = \
-        #     extract_sent_words_feature(tokenized_train_content, tokenized_train_content)
-        #
-        # dev_data['tweet_length'] = extract_length_feature(tokenized_dev_content)
-        # dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
-        # dev_data['question_mark'] = extract_question_mark_feature(dev_data['content'])
-        # dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['content'])
-        # dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
-        # dev_data['hashtag_number'] = extract_hashtag_number_feature(dev_data['content'])
-        # dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = \
-        #     extract_sent_words_feature(tokenized_dev_content, tokenized_train_content)
-        #
-        # if bTestPhase:
-        #     tst_data['tweet_length'] = extract_length_feature(tokenized_tst_data)
-        #     tst_data['has_uppercase'] = extract_uppercase_feature(tst_data['content'])
-        #     tst_data['question_mark'] = extract_question_mark_feature(tst_data['content'])
-        #     tst_data['exclamation_mark'] = extract_exclamation_mark_feature(tst_data['content'])
-        #     tst_data['letter_repetition'] = extract_letter_repetition_feature(tst_data['content'])
-        #     tst_data['hashtag_number'] = extract_hashtag_number_feature(tst_data['content'])
-        #     tst_data['pos_voc'], tst_data['neg_voc'], tst_data['neu_voc'], tst_data['none_voc'] = \
-        #         extract_sent_words_feature(tokenized_tst_data, tokenized_train_content)
-        #
-        # if bEvalPhase:
-        #     eval_data['tweet_length'] = extract_length_feature(tokenized_eval_data)
-        #     eval_data['has_uppercase'] = extract_uppercase_feature(eval_data['content'])
-        #     eval_data['question_mark'] = extract_question_mark_feature(eval_data['content'])
-        #     eval_data['exclamation_mark'] = extract_exclamation_mark_feature(eval_data['content'])
-        #     eval_data['letter_repetition'] = extract_letter_repetition_feature(eval_data['content'])
-        #     eval_data['hashtag_number'] = extract_hashtag_number_feature(eval_data['content'])
-        #     eval_data['pos_voc'], eval_data['neg_voc'], eval_data['neu_voc'], eval_data['none_voc'] = \
-        #         extract_sent_words_feature(tokenized_eval_data, tokenized_train_content)
+        # FEATURE EXTRACTION
+        train_data['tweet_length'] = extract_length_feature(train_data['content'])
+        train_data['has_uppercase'] = extract_uppercase_feature(train_data['content'])
+        train_data['question_mark'] = extract_question_mark_feature(train_data['content'])
+        train_data['exclamation_mark'] = extract_exclamation_mark_feature(train_data['content'])
+        train_data['letter_repetition'] = extract_letter_repetition_feature(train_data['content'])
+        train_data['hashtag_number'] = extract_hashtag_number_feature(train_data['content'])
+        train_data['pos_voc'], train_data['neg_voc'], train_data['neu_voc'], train_data['none_voc'] = \
+            extract_sent_words_feature(train_data['tokenized'], train_data['tokenized'])
+
+        dev_data['tweet_length'] = extract_length_feature(dev_data['content'])
+        dev_data['has_uppercase'] = extract_uppercase_feature(dev_data['content'])
+        dev_data['question_mark'] = extract_question_mark_feature(dev_data['content'])
+        dev_data['exclamation_mark'] = extract_exclamation_mark_feature(dev_data['content'])
+        dev_data['letter_repetition'] = extract_letter_repetition_feature(dev_data['content'])
+        dev_data['hashtag_number'] = extract_hashtag_number_feature(dev_data['content'])
+        dev_data['pos_voc'], dev_data['neg_voc'], dev_data['neu_voc'], dev_data['none_voc'] = \
+            extract_sent_words_feature(dev_data['tokenized'], train_data['tokenized'])
+
+        if bTestPhase:
+            test_data['tweet_length'] = extract_length_feature(test_data['content'])
+            test_data['has_uppercase'] = extract_uppercase_feature(test_data['content'])
+            test_data['question_mark'] = extract_question_mark_feature(test_data['content'])
+            test_data['exclamation_mark'] = extract_exclamation_mark_feature(test_data['content'])
+            test_data['letter_repetition'] = extract_letter_repetition_feature(test_data['content'])
+            test_data['hashtag_number'] = extract_hashtag_number_feature(test_data['content'])
+            test_data['pos_voc'], test_data['neg_voc'], test_data['neu_voc'], test_data['none_voc'] = \
+                extract_sent_words_feature(test_data['tokenized'], train_data['tokenized'])
+
+        if bEvalPhase:
+            valid_data['tweet_length'] = extract_length_feature(valid_data['content'])
+            valid_data['has_uppercase'] = extract_uppercase_feature(valid_data['content'])
+            valid_data['question_mark'] = extract_question_mark_feature(valid_data['content'])
+            valid_data['exclamation_mark'] = extract_exclamation_mark_feature(valid_data['content'])
+            valid_data['letter_repetition'] = extract_letter_repetition_feature(valid_data['content'])
+            valid_data['hashtag_number'] = extract_hashtag_number_feature(valid_data['content'])
+            valid_data['pos_voc'], valid_data['neg_voc'], valid_data['neu_voc'], valid_data['none_voc'] = \
+                extract_sent_words_feature(valid_data['tokenized'], train_data['tokenized'])
 
         # COUNT VECTORS
         if bCountVectors:
@@ -495,72 +486,72 @@ if __name__ == '__main__':
                 _, valid_tfidf = perform_tf_idf_vectors(train_data['final_data'],
                                                                         valid_data['final_data'])
 
-        # train_features = pd.DataFrame({
-        #     'tweet_length': train_data['tweet_length'],
-        #     'has_uppercase': train_data['has_uppercase'],
-        #     'exclamation_mark': train_data['exclamation_mark'],
-        #     'question_mark': train_data['question_mark'],
-        #     'hashtag_number': train_data['hashtag_number'],
-        #     'pos_voc': train_data['pos_voc'],
-        #     'neg_voc': train_data['neg_voc'],
-        #     'neu_voc': train_data['neu_voc'],
-        #     'none_voc': train_data['none_voc'],
-        #     'letter_repetition': train_data['letter_repetition']
-        # })
-        #
-        # dev_features = pd.DataFrame({
-        #     'tweet_length': dev_data['tweet_length'],
-        #     'has_uppercase': dev_data['has_uppercase'],
-        #     'exclamation_mark': dev_data['exclamation_mark'],
-        #     'question_mark': dev_data['question_mark'],
-        #     'hashtag_number': dev_data['hashtag_number'],
-        #     'pos_voc': dev_data['pos_voc'],
-        #     'neg_voc': dev_data['neg_voc'],
-        #     'neu_voc': dev_data['neu_voc'],
-        #     'none_voc': dev_data['none_voc'],
-        #     'letter_repetition': dev_data['letter_repetition']
-        # })
-        #
-        # if bTestPhase is True:
-        #     tst_features = pd.DataFrame({
-        #         'tweet_length': tst_data['tweet_length'],
-        #         'has_uppercase': tst_data['has_uppercase'],
-        #         'exclamation_mark': tst_data['exclamation_mark'],
-        #         'question_mark': tst_data['question_mark'],
-        #         'hashtag_number': tst_data['hashtag_number'],
-        #         'pos_voc': tst_data['pos_voc'],
-        #         'neg_voc': tst_data['neg_voc'],
-        #         'neu_voc': tst_data['neu_voc'],
-        #         'none_voc': tst_data['none_voc'],
-        #         'letter_repetition': tst_data['letter_repetition']
-        #     })
-        #
-        # if bEvalPhase is True:
-        #     eval_features = pd.DataFrame({
-        #         'tweet_length': eval_data['tweet_length'],
-        #         'has_uppercase': eval_data['has_uppercase'],
-        #         'exclamation_mark': eval_data['exclamation_mark'],
-        #         'question_mark': eval_data['question_mark'],
-        #         'hashtag_number': eval_data['hashtag_number'],
-        #         'pos_voc': eval_data['pos_voc'],
-        #         'neg_voc': eval_data['neg_voc'],
-        #         'neu_voc': eval_data['neu_voc'],
-        #         'none_voc': eval_data['none_voc'],
-        #         'letter_repetition': eval_data['letter_repetition']
-        #     })
+        train_features = pd.DataFrame({
+            # 'tweet_length': train_data['tweet_length'],
+            'has_uppercase': train_data['has_uppercase'],
+            'exclamation_mark': train_data['exclamation_mark'],
+            'question_mark': train_data['question_mark'],
+            'hashtag_number': train_data['hashtag_number'],
+            'pos_voc': train_data['pos_voc'],
+            'neg_voc': train_data['neg_voc'],
+            'neu_voc': train_data['neu_voc'],
+            'none_voc': train_data['none_voc'],
+            'letter_repetition': train_data['letter_repetition']
+        })
+
+        dev_features = pd.DataFrame({
+            # 'tweet_length': dev_data['tweet_length'],
+            'has_uppercase': dev_data['has_uppercase'],
+            'exclamation_mark': dev_data['exclamation_mark'],
+            'question_mark': dev_data['question_mark'],
+            'hashtag_number': dev_data['hashtag_number'],
+            'pos_voc': dev_data['pos_voc'],
+            'neg_voc': dev_data['neg_voc'],
+            'neu_voc': dev_data['neu_voc'],
+            'none_voc': dev_data['none_voc'],
+            'letter_repetition': dev_data['letter_repetition']
+        })
+
+        if bTestPhase is True:
+            test_features = pd.DataFrame({
+                # 'tweet_length': test_data['tweet_length'],
+                'has_uppercase': test_data['has_uppercase'],
+                'exclamation_mark': test_data['exclamation_mark'],
+                'question_mark': test_data['question_mark'],
+                'hashtag_number': test_data['hashtag_number'],
+                'pos_voc': test_data['pos_voc'],
+                'neg_voc': test_data['neg_voc'],
+                'neu_voc': test_data['neu_voc'],
+                'none_voc': test_data['none_voc'],
+                'letter_repetition': test_data['letter_repetition']
+            })
+
+        if bEvalPhase is True:
+            valid_features = pd.DataFrame({
+                'tweet_length': valid_data['tweet_length'],
+                'has_uppercase': valid_data['has_uppercase'],
+                'exclamation_mark': valid_data['exclamation_mark'],
+                'question_mark': valid_data['question_mark'],
+                'hashtag_number': valid_data['hashtag_number'],
+                'pos_voc': valid_data['pos_voc'],
+                'neg_voc': valid_data['neg_voc'],
+                'neu_voc': valid_data['neu_voc'],
+                'none_voc': valid_data['none_voc'],
+                'letter_repetition': valid_data['letter_repetition']
+            })
 
 
         # TRAINING
         # TODO Choose the training, development and test sets #########################################################
-        set_names_array = ['Count Vectors']
-        training_set_array = [train_count_vectors]
+        set_names_array = ['Features']
+        training_set_array = [train_features]
         training_labels = train_data['sentiment']
 
-        dev_set_array = [dev_count_vectors]
+        dev_set_array = [dev_features]
         dev_labels = dev_data['sentiment']
 
         if bTestPhase is True:
-            test_set_array = [test_count_vectors]
+            test_set_array = [test_features]
             test_labels = test_data['sentiment']
         if bEvalPhase is True:
             valid_set_array = [valid_count_vectors]
@@ -635,44 +626,74 @@ if __name__ == '__main__':
             all_test_probabilities.append(mini_test)
             all_valid_probabilities.append(mini_valid)
 
-        # str_phase = 'test' if bEvalPhase else 'dev'
-        # str_full_reduced = 'reduced' if bReduced else 'full'
-
-        # # FASTTEXT
+        # FASTTEXT
         # fasttext_df = fasttext_to_df('./new_fasttext/{0}/{1}/{2}_{1}_{0}.out'.format(str_mode, str_phase, sLang))
-        #
-        # # Use only if you want to use the fasttext from fasttext folder, not from new_fasttext
-        # # fasttext_path = './fasttext/{}_fasttext_outputs_dev-test_full-reduced/'.format(str_mode)
-        # # fasttext_file = '{}_{}_fasttext_{}.csv'.format(sLang, str_phase, str_full_reduced)
-        # # fasttext_df = pd.read_csv(fasttext_path + fasttext_file)
-        # # fasttext_df = fasttext_df.drop(columns='ID')
-        #
-        # print("FASTTEXT MODEL")
-        # fasttext_probabilities = fasttext_df.to_numpy()
-        # fasttext_predictions = fasttext_probabilities.argmax(1)
-        # if bEvalPhase:
-        #     print_confusion_matrix(fasttext_predictions, eval_labels)
-        # else:
-        #     print_confusion_matrix(fasttext_predictions, dev_labels)
-        # print()
-        #
-        # # BERT
-        # print("BERT MODEL")
-        # if not (bTern and bCross):  # The only mode without predictions
-        #     bert_path = './bert/{}_bert_dev-test_full-reduced/'.format(str_mode)
-        #     bert_file = '{}_{}_bert_{}.csv'.format(sLang, str_phase, str_full_reduced)
-        #
-        #     bert_df = pd.read_csv(bert_path + bert_file)
-        #     bert_df = bert_df.drop(bert_df.columns[0], axis=1)
-        #     bert_df = bert_df.drop(columns='id')
-        #
-        #     bert_probabilities = bert_df.to_numpy()
-        #     bert_predictions = bert_probabilities.argmax(1)
-        #     if bEvalPhase:
-        #         print_confusion_matrix(bert_predictions, eval_labels)
-        #     else:
-        #         print_confusion_matrix(bert_predictions, dev_labels)
-        #     print()
+
+        # Use only if you want to use the fasttext from fasttext folder, not from new_fasttext
+        # fasttext_path = './fasttext/{}_fasttext_outputs_dev-test_full-reduced/'.format(str_mode)
+        # fasttext_file = '{}_{}_fasttext_{}.csv'.format(sLang, str_phase, str_full_reduced)
+        # fasttext_df = pd.read_csv(fasttext_path + fasttext_file)
+        # fasttext_df = fasttext_df.drop(columns='ID')
+
+        print("FASTTEXT MODEL")
+        dev_fasttext_df = pd.read_csv('./fasttext/probabilities/{}_ingeotec_model_1_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
+        dev_fasttext_probabilities = dev_fasttext_df.to_numpy()
+        dev_fasttext_probabilities = numpy.delete(dev_fasttext_probabilities, 0, 1)
+        dev_fasttext_predictions = dev_fasttext_probabilities.argmax(1)
+        print_confusion_matrix(dev_fasttext_predictions, dev_labels)
+
+        if bTestPhase:
+            test_fasttext_df = pd.read_csv('./fasttext/probabilities/{}_ingeotec_model_2_test.csv'.format(sLang), encoding='utf-8', sep='\t')
+            test_fasttext_probabilities = test_fasttext_df.to_numpy()
+            test_fasttext_probabilities = numpy.delete(test_fasttext_probabilities, 0, 1)
+            test_fasttext_predictions = test_fasttext_probabilities.argmax(1)
+            print_confusion_matrix(test_fasttext_predictions, test_labels)
+
+        print()
+
+        # BERT
+        print("BERT MODEL")
+        model_number = '7'
+        # bert_path = './bert/mono_bert_dev-test_full-reduced/'
+        # bert_file = '{}_dev_bert_full.csv'.format(sLang)
+        bert_path = './bert/dev/{}/dev_results_{}.csv'.format(sLang, model_number)
+
+        dev_bert_df = pd.read_csv(bert_path, encoding='utf-8', sep='\t')
+        dev_bert_predictions = dev_bert_df['predictions']
+        dev_bert_df = dev_bert_df.drop(dev_bert_df.columns[0], axis=1)
+        dev_bert_df = dev_bert_df.drop(columns='predictions')
+        dev_bert_probabilities = dev_bert_df.to_numpy()
+
+        # dev_bert_df = pd.read_csv(bert_path + bert_file)
+        # dev_bert_df = dev_bert_df.drop(dev_bert_df.columns[0], axis=1)
+        # dev_bert_df = dev_bert_df.drop(columns='id')
+        # dev_bert_probabilities = dev_bert_df.to_numpy()
+        # dev_bert_predictions = dev_bert_probabilities.argmax(1)
+
+        print_confusion_matrix(dev_bert_predictions, dev_labels)
+
+        if bTestPhase:
+            # bert_path = './bert/mono_bert_dev-test_full-reduced/'
+            # bert_file = '{}_test_bert_full.csv'.format(sLang)
+            bert_path = './bert/test/{}/test_results_{}.csv'.format(sLang, model_number)
+
+            test_bert_df = pd.read_csv(bert_path, encoding='utf-8', sep='\t')
+            test_bert_predictions = test_bert_df['predictions']
+            test_bert_df = test_bert_df.drop(test_bert_df.columns[0], axis=1)
+            test_bert_df = test_bert_df.drop(columns='predictions')
+            test_bert_probabilities = test_bert_df.to_numpy()
+
+            # test_bert_df = pd.read_csv(bert_path + bert_file)
+            # test_bert_df = test_bert_df.drop(test_bert_df.columns[0], axis=1)
+            # test_bert_df = test_bert_df.drop(columns='id')
+            # test_bert_probabilities = test_bert_df.to_numpy()
+            # test_bert_predictions = test_bert_probabilities.argmax(1)
+
+            print_confusion_matrix(test_bert_predictions, test_labels)
+
+
+        print()
+
         #
         # # GLOVE + BPE + W2V
         # print("G+B+W MODEL")
@@ -699,16 +720,17 @@ if __name__ == '__main__':
         print()
 
         selected_classifier = 0  # See all the classifiers available above.
-
         probabilities_for_voting_ensemble_dev = [
             all_probabilities[0][selected_classifier],
-            all_probabilities[1][selected_classifier]
+            dev_fasttext_probabilities,
+            dev_bert_probabilities
         ]
 
         if bTestPhase:
             probabilities_for_voting_ensemble_test = [
                 all_test_probabilities[0][selected_classifier],
-                all_test_probabilities[1][selected_classifier]
+                test_fasttext_probabilities,
+                test_bert_probabilities
             ]
 
         if bEvalPhase:
@@ -717,11 +739,11 @@ if __name__ == '__main__':
                 all_valid_probabilities[1][selected_classifier]
             ]
 
-        print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_dev))
+        print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_dev), dev_labels)
         if bEvalPhase:
-            print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_valid))
+            print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_valid), valid_labels)
         if bTestPhase:
-            print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_valid))
+            print_confusion_matrix(get_averaged_predictions(probabilities_for_voting_ensemble_test), test_labels)
         print()
 
         print()

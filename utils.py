@@ -63,6 +63,11 @@ def untokenize_sentence(simple_list):
     return TreebankWordDetokenizer().detokenize(simple_list)
 
 
+def lemmatize_sentence(sentence, lemmatizer):
+    data = untokenize_sentence(sentence)
+    return [token.lemma_ for token in lemmatizer(data)]
+
+
 def read_files(sLang, bStoreFiles=False):
     train_data = pd.DataFrame()
     dev_data = pd.DataFrame()
@@ -91,13 +96,14 @@ def read_files(sLang, bStoreFiles=False):
     return train_data, dev_data, test_data, valid_data
 
 
-def csv_to_flair_format(preprocess=False, postpreprocess=False):
+def csv_to_flair_format(preprocess=False, postpreprocess=False, bUpsampling=False):
     for sLang in ['es', 'cr', 'mx', 'pe', 'uy', 'all']:
         train_data = pd.read_csv('./dataset/csv/intertass_{}_train.csv'.format(sLang), encoding='utf-8', sep='\t')
         test_data = pd.read_csv('./dataset/csv/intertass_{}_test.csv'.format(sLang), encoding='utf-8', sep='\t')
         dev_data = pd.read_csv('./dataset/csv/intertass_{}_dev.csv'.format(sLang), encoding='utf-8', sep='\t')
 
-        train_data = perform_upsampling(train_data)
+        if bUpsampling:
+            train_data = perform_upsampling(train_data)
 
         encoder = preprocessing.LabelEncoder()
         test_data['sentiment'] = encoder.fit_transform(test_data['sentiment'])
@@ -116,9 +122,9 @@ def csv_to_flair_format(preprocess=False, postpreprocess=False):
             dev_data['content'] = dev_data.swifter.apply(lambda row: libreoffice_processing(row.content, dictionary), axis=1)
             test_data['content'] = test_data.swifter.apply(lambda row: libreoffice_processing(row.content, dictionary), axis=1)
 
-        csv2flair(train_data['content'], train_data['sentiment'], sLang, 'train')
-        csv2flair(dev_data['content'], dev_data['sentiment'], sLang, 'dev')
-        csv2flair(test_data['content'], test_data['sentiment'], sLang, 'test')
+        csv2ftx(train_data['content'], train_data['sentiment'], sLang, 'train', 'flair')
+        csv2ftx(dev_data['content'], dev_data['sentiment'], sLang, 'dev', 'flair')
+        csv2ftx(test_data['content'], test_data['sentiment'], sLang, 'test', 'flair')
 
 
 def encode_label(list_of_labels):
@@ -161,11 +167,11 @@ def perform_upsampling(dataframe):
 
 
 # AUXILIAR
-def csv2flair(data, labels, sLang, sPhase):
+def csv2ftx(data, labels, sLang, sPhase, folder):
     result = pandas.DataFrame()
     result['labels'] = ['__label__' + str(label) for label in labels]
     result['content'] = data
-    result.to_csv('dataset/flair/intertass_{}_{}.txt'.format(sLang, sPhase), header=None, index=None, sep=' ')
+    result.to_csv('dataset/{}/intertass_{}_{}.txt'.format(folder, sLang, sPhase), header=None, index=None, sep=' ')
     return
 
 
